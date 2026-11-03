@@ -324,7 +324,7 @@ const AssistantMessageBody: FC<AssistantMessageProps & { collapsedNotice?: null 
             className="wrap-anywhere min-w-0 max-w-full overflow-hidden text-pretty text-[length:var(--conversation-text-font-size)] leading-(--dt-line-height) text-foreground"
             data-slot="aui_assistant-message-content"
           >
-            {/* Todos render in the composer status stack now, not inline. */}
+            {/* Todo writes render as their own checklist card, per call. */}
             {MESSAGE_PARTS}
             <StoppedNotice />
             <AssistantStatusSlot />

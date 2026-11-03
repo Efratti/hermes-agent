@@ -21,7 +21,7 @@ import { isCardTool, isFileEditTool, isSilentTool } from '@/lib/tool-render-clas
  *   - The DOM budget protects the paint, and what a turn paints is decided by
  *     the GROUPING, not by the bytes behind it. A settled run of twelve reads
  *     is one grey summary line, a thought is one collapsed disclosure, a
- *     `todo` is hoisted out of the transcript entirely, and a generated image
+ *     `todo` is one collapsed one-line card, and a generated image
  *     is one `<img>` however long its data URL. Charging those their payload
  *     had the budget counting hundreds of units of work that never mounts, so
  *     "Show earlier" appeared after two or three tool-heavy turns of a session

@@ -8,13 +8,21 @@ import { $sessions, lineageAliases } from './session'
 import { $sessionStates } from './session-states'
 
 /**
- * Live todo list per runtime session, rendered by the composer status stack
- * (the inline transcript panel is gone). Fed from two places:
+ * Live todo list per runtime session. Two consumers:
+ *
+ * - the transcript card (`assistant-ui/tool/todo-card.tsx`), which is the
+ *   durable record — it renders each write from the tool part's own result and
+ *   survives reloads;
+ * - the composer status stack, which is the at-a-glance summary above the input
+ *   and is transient by design.
+ *
+ * Fed from two places:
  *
  * - live `todo` tool events (use-message-stream)
  * - stored-session hydration (desktop-controller) — but only when the list is
  *   still in flight, so reopening an old chat doesn't pin its finished plan
- *   above the composer forever.
+ *   above the composer forever. (The transcript card has no such rule: history
+ *   is the point.)
  */
 export const $todosBySession = atom<Record<string, TodoItem[]>>({})
 export const $todoRevisionsBySession = atom<Record<string, number>>({})

@@ -70,9 +70,9 @@ export function activitySignature(content: readonly ActivityPart[], reasoningSho
  *
  * A call in flight renders its own row, with its own timer, so a second
  * spinner under it would count the same seconds twice. Silent tools don't:
- * `todo` is hoisted to its own panel and a reaction's UI is the emoji landing
- * on the bubble, so neither leaves anything on screen to time — a wait on one
- * of those is as unnarrated as a wait on nothing at all.
+ * a reaction's UI is the emoji landing on the bubble, so it leaves nothing on
+ * screen to time — a wait on one of those is as unnarrated as a wait on
+ * nothing at all.
  */
 export function toolNarratesWait(content: readonly ActivityPart[]): boolean {
   return content.some(
