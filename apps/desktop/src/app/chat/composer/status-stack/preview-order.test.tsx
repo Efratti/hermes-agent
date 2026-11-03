@@ -60,7 +60,10 @@ it.each([false, true])('keeps artifact links below the queue with background wor
   const view = render(stack(true))
   const file = screen.getByText('index.html')
   const header = screen.getByRole('button', { name: /1 Queued/ })
-  expectBefore(screen.getByText('Task item'), file)
+  // The todo group renders as one collapsed line now, so the ordering check
+  // rides its header instead of a row title.
+  const todoHeader = screen.getByRole('button', { name: /Tasks 0\/1/ })
+  expectBefore(todoHeader, file)
   expectBefore(header, file)
   expect(screen.queryAllByText('Live preview')).toHaveLength(background ? 1 : 0)
 
@@ -75,7 +78,7 @@ it.each([false, true])('keeps artifact links below the queue with background wor
   }
 
   view.rerender(stack(false))
-  expectBefore(screen.getByText('Task item'), file)
+  expectBefore(screen.getByRole('button', { name: /Tasks 0\/1/ }), file)
   view.rerender(stack(true))
   expectBefore(screen.getByRole('button', { name: /1 Queued/ }), file)
 })

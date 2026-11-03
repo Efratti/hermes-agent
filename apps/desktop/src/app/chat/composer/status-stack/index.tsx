@@ -88,7 +88,11 @@ const groupLabel = (group: StatusGroup, s: Translations['statusStack']) => {
   }
 
   if (group.type === 'todo') {
-    return s.todos(group.items.filter(i => i.todoStatus === 'completed').length, group.items.length)
+    // Cancelled items are not work: the transcript card's count skips them, so
+    // the pin must too or the same plan reports two different totals.
+    const counted = group.items.filter(i => i.todoStatus !== 'cancelled')
+
+    return s.todos(counted.filter(i => i.todoStatus === 'completed').length, counted.length)
   }
 
   return group.type === 'subagent' ? s.subagents(group.items.length) : s.background(group.items.length)
@@ -290,7 +294,12 @@ export function ComposerStatusStack({ onSubmit, queue, sessionId }: ComposerStat
               />
             ) : undefined
           }
-          defaultCollapsed={group.type !== 'todo'}
+          // Todos used to auto-expand: the plan had nowhere else to live. The
+          // transcript card is that place now, so the stack keeps the same rule
+          // as every other group — one line, expandable on click. Six rows
+          // duplicated 20px above a card showing the same six rows read as a
+          // rendering bug.
+          defaultCollapsed
           icon={<Codicon className="text-muted-foreground/70" name={GROUP_ICON[group.type]} size="0.8rem" />}
           label={groupLabel(group, t.statusStack)}
         >
