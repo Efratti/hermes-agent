@@ -79,6 +79,14 @@ if (args) {
   // tear down Vite during this handoff. No backend, windows or single-instance
   // lock are created in this parent. The child has an explicit platform flag,
   // so it goes straight into main on its first pass.
+  //
+  // This parent owns no window, so its GPU process is pure overhead: measured
+  // at 179 MB of a Chromium zygote + gpu-process tree sitting idle for the whole
+  // session on WSLg. Software rendering costs nothing without a surface, and
+  // app.disableHardwareAcceleration() only affects THIS process - the child is
+  // spawned with its own argv and keeps the hardware path.
+  app.disableHardwareAcceleration()
+
   const child = spawnWslgLaunch(args)
 
   child.once('error', error => {

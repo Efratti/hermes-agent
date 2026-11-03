@@ -32,7 +32,8 @@ beforeAll(async () => {
       process.exit(0)
     }
     // Externals the bundle leaves to Electron's node_modules. Stub each with
-    // every name the bundle imports from it; only app.exit is ever called.
+    // every name the bundle imports from it; only app.exit and
+    // app.disableHardwareAcceleration are ever called.
     const bundled = readFileSync(${JSON.stringify(bundle)}, 'utf8')
     const stub = specifier => {
       const names = new Set(specifier === 'electron' ? ['app'] : [])
@@ -42,7 +43,7 @@ beforeAll(async () => {
       }
       names.delete('')
       return [...names].map(name => name === 'app'
-        ? 'export const app = { exit: code => process.exit(code) }'
+        ? 'export const app = { exit: code => process.exit(code), disableHardwareAcceleration: () => {} }'
         : 'export const ' + name + ' = {}').join('\\n') + '\\nexport default {}'
     }
     const externals = new Set(['electron', 'node-pty', 'get-windows'])
