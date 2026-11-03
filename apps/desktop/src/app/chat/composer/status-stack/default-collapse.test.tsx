@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { afterEach, expect, it } from 'vitest'
 
@@ -65,7 +65,7 @@ it('offers a collapsed read-only checklist from an idle session, without a runni
   expect(screen.queryByLabelText('Running')).toBeNull()
 })
 
-it('auto-expands only todos and keeps other groups closed as activity arrives', () => {
+it('starts every group collapsed, todos included, and expands on demand', () => {
   $todosBySession.set({ owner: [{ id: 'todo', content: 'Visible todo', status: 'in_progress' }] })
   $goalsBySession.set({ owner: { status: 'active', title: 'Hidden legacy goal', updatedAt: 1 } })
   $backgroundStatusBySession.set({
@@ -74,11 +74,21 @@ it('auto-expands only todos and keeps other groups closed as activity arrives', 
   upsertSubagent('owner', { subagent_id: 'worker', goal: 'Worker task' })
   const view = render(stack())
 
-  expect(screen.getByText('Visible todo')).toBeTruthy()
+  // The plan lives in the transcript card now; the stack pins one line. Rows
+  // here duplicated the card sitting 20px above them.
+  expect(screen.queryByText('Visible todo')).toBeNull()
+
+  const todoHeader = screen.getByRole('button', { name: /Tasks 0\/1/ })
+  expect(todoHeader.getAttribute('aria-expanded')).toBe('false')
+  // Collapsed still reports liveness: a running todo shows the spinner.
+  expect(within(todoHeader).getByLabelText('Running')).toBeTruthy()
 
   for (const text of ['Hidden legacy goal', 'Background process', 'Worker task', 'Queued request']) {
     expect(screen.queryByText(text)).toBeNull()
   }
+
+  fireEvent.click(todoHeader)
+  expect(screen.getByText('Visible todo')).toBeTruthy()
 
   act(() => upsertSubagent('owner', { subagent_id: 'worker', text: 'Progress arrived' }, false, 'subagent.progress'))
   view.rerender(stack(true))

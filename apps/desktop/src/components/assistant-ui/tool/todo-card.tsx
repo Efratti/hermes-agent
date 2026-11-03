@@ -79,7 +79,10 @@ const TodoCard: FC<{ revision: null | number; todos: readonly TodoItem[] }> = ({
   const { t } = useI18n()
   const runtimeId = useStore(useSessionView().$runtimeId)
   const liveRevision = useStoreSelector($todoRevisionsBySession, map => (runtimeId ? map[runtimeId] : undefined))
-  const [opened, setOpened] = useState(false)
+  // null = follow the live rule; true/false = the user overrode it on this card.
+  // Without the override a live card could not be closed: `isLive || opened` is
+  // true no matter how many times you click it.
+  const [override, setOverride] = useState<boolean | null>(null)
 
   const done = todos.filter(todo => todo.status === 'completed').length
   const counted = todos.filter(todo => todo.status !== 'cancelled')
@@ -89,14 +92,14 @@ const TodoCard: FC<{ revision: null | number; todos: readonly TodoItem[] }> = ({
   // opens on its own so the live plan is readable without a click. Anything
   // older collapses to its one-line summary once a newer write lands.
   const isLive = revision !== null && liveRevision !== undefined && revision === liveRevision
-  const expanded = isLive || opened
+  const expanded = override ?? isLive
 
   return (
     <div className="my-1" data-slot="todo-card">
       <button
         aria-expanded={expanded}
         className="flex w-full items-center gap-1.5 text-left"
-        onClick={() => setOpened(open => !open)}
+        onClick={() => setOverride(!expanded)}
         type="button"
       >
         <DisclosureCaret open={expanded} size="1em" />
