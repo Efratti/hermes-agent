@@ -7,6 +7,7 @@ import { persistString, storedString } from '@/lib/storage'
 import { recordFeatureToggle } from './desktop-metrics'
 import { $gateway } from './gateway'
 import { $hapticsMuted } from './haptics'
+import { $notificationsMuted } from './notifications-muted'
 import { withinNativeNotifyBaseline } from './notify-baseline'
 import {
   answerApproval,
@@ -226,6 +227,13 @@ export interface NativeNotificationInput {
 export function dispatchNativeNotification(input: NativeNotificationInput): boolean {
   const prefs = $nativeNotifyPrefs.get()
 
+  // One-click global mute: drop before any IPC, so the OS notification and the
+  // window flash main pairs with it both stay silent. The saved prefs are left
+  // untouched, so unmuting restores exactly the user's own gates.
+  if ($notificationsMuted.get()) {
+    return false
+  }
+
   if (!prefs.enabled || !prefs.kinds[input.kind]) {
     return false
   }
@@ -427,9 +435,15 @@ export async function respondToApprovalAction(sessionId: null | string, actionId
   }
 }
 
-// Settings "send test" — bypasses gating. Returns whether the OS accepted it so
-// the panel can flag a silent permission failure instead of looking dead.
+// Settings "send test" — bypasses the focus/kind gating. Returns whether the OS
+// accepted it so the panel can flag a silent permission failure instead of
+// looking dead. The global mute still silences it: no OS notification may
+// appear while the titlebar bell is struck through.
 export async function sendTestNativeNotification(title: string, body: string): Promise<boolean> {
+  if ($notificationsMuted.get()) {
+    return false
+  }
+
   const bridge = window.hermesDesktop
 
   if (!bridge?.notify) {

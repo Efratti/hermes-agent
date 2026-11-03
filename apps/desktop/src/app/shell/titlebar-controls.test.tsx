@@ -10,6 +10,7 @@ import { $narrowViewport } from '@/components/pane-shell/tree/store'
 import { registry } from '@/contrib/registry'
 import { I18nProvider } from '@/i18n'
 import { $fileBrowserOpen, $leftSideOpen, CHAT_SIDEBAR_PANE_ID, FILE_BROWSER_PANE_ID } from '@/store/layout'
+import { setNotificationsMuted } from '@/store/notifications-muted'
 import { REVIEW_PANE_ID } from '@/store/review'
 import { setTitlebarAppActionsSide } from '@/store/titlebar-app-actions'
 
@@ -189,6 +190,55 @@ describe('TitlebarControls fixed clusters', () => {
         window.removeEventListener(TITLEBAR_CHROME_CHANGED_EVENT, listener)
       }
     })
+  })
+})
+
+describe('titlebar notification mute', () => {
+  afterEach(() => {
+    setNotificationsMuted(false)
+    cleanup()
+  })
+
+  it('mutes and unmutes globally from the top bar, flipping aria-pressed', () => {
+    renderControls('/')
+
+    const mute = screen.getByRole('button', { name: 'Mute notifications' })
+    expect(mute.getAttribute('aria-pressed')).toBe('false')
+
+    fireEvent.click(mute)
+
+    const unmute = screen.getByRole('button', { name: 'Unmute notifications' })
+    expect(unmute.getAttribute('aria-pressed')).toBe('true')
+
+    fireEvent.click(unmute)
+    expect(screen.getByRole('button', { name: 'Mute notifications' }).getAttribute('aria-pressed')).toBe('false')
+  })
+
+  it('keeps the toggle on a page that owns the titlebar cluster', () => {
+    const disposeRoutes = registry.registerMany([
+      {
+        area: ROUTES_AREA,
+        data: { path: '/kanban' },
+        id: 'test-kanban-route-mute',
+        render: () => null
+      }
+    ])
+
+    const disposeChrome = registry.register({
+      area: 'titleBar.left',
+      id: 'test-plugin-chrome-mute',
+      render: () => <span>plugin-chrome</span>
+    })
+
+    try {
+      renderControls('/kanban')
+
+      expect(screen.queryByLabelText('Window controls')).toBeNull()
+      expect(screen.getByRole('button', { name: 'Mute notifications' })).toBeTruthy()
+    } finally {
+      act(() => disposeChrome())
+      disposeRoutes()
+    }
   })
 })
 

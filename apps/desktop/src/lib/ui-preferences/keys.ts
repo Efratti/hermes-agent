@@ -79,6 +79,7 @@ const SHARED_KEYS: ReadonlySet<string> = new Set([
   'hermes.desktop.autoSpeakReplies',
   'hermes.desktop.completionSoundVariantId',
   'hermes.desktop.hapticsMuted',
+  'hermes.desktop.notificationsMuted',
   'hermes.desktop.videoPlaybackSpeed',
   // Model picker.
   'hermes.desktop.collapsed-providers',

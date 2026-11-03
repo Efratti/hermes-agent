@@ -30,6 +30,7 @@ const LOAD_WRITERS = [
   () => import('@/store/external-links'),
   () => import('@/store/haptics'),
   () => import('@/store/keybinds'),
+  () => import('@/store/notifications-muted'),
   () => import('@/store/profile'),
   () => import('@/store/reasoning-disclosure'),
   () => import('@/store/thread-timeline'),

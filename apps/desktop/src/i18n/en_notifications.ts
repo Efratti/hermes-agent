@@ -51,6 +51,7 @@ export const enNotifications = {
   testTitle: 'Hermes',
   testBody: 'Notifications are working.',
   testSent: 'Test sent. If nothing appears, check your OS notification permissions and Focus/Do Not Disturb.',
+  testMuted: 'Notifications are muted. Unmute them from the bell in the title bar to test delivery.',
   testUnsupported: 'This system does not support native notifications.',
   muteSoundsTitle: 'Mute interface sounds',
   muteSoundsDesc:

@@ -32,6 +32,7 @@ import {
   togglePanesFlipped,
   toggleRightSide
 } from '@/store/layout'
+import { $notificationsMuted, toggleNotificationsMuted } from '@/store/notifications-muted'
 import { REVIEW_PANE_ID } from '@/store/review'
 import { $unreadSessionCount } from '@/store/session-dot-state'
 import { $titlebarAppActionsSide, TITLEBAR_FIXED_TOOLS } from '@/store/titlebar-app-actions'
@@ -191,6 +192,7 @@ export function TitlebarControls({ leftTools = [], tools = [], onOpenSettings }:
   const panesFlipped = useStore($panesFlipped)
   const unreadCount = useStore($unreadSessionCount)
   const appActionsSide = useStore($titlebarAppActionsSide)
+  const notificationsMuted = useStore($notificationsMuted)
   const interfaceMode = useStore($interfaceMode)
   const unreadBadge = unreadCount > 0 ? unreadCount : undefined
   const unreadHint = unreadBadge ? ` · ${t.titlebar.unreadSessions(unreadBadge)}` : ''
@@ -254,6 +256,25 @@ export function TitlebarControls({ leftTools = [], tools = [], onOpenSettings }:
       rightEdge.toggle()
     },
     tour: 'right-pane-toggle'
+  }
+
+  // One click silences every OS notification and the window flash main pairs
+  // with it. The gate lives in dispatchNativeNotification ahead of the notify
+  // IPC and never touches the saved enabled/kinds preferences, so pressing
+  // this again restores exactly the user's own settings.
+  const notificationsTool: TitlebarTool = {
+    ...TITLEBAR_FIXED_TOOLS['notifications-mute'],
+    active: notificationsMuted,
+    className: notificationsMuted ? 'text-(--ui-yellow) hover:text-(--ui-yellow)' : undefined,
+    icon: <TitlebarIcon name={notificationsMuted ? 'bell-slash' : 'bell'} />,
+    id: 'notifications-mute',
+    label: notificationsMuted ? t.desktop.unmuteNotifications : t.desktop.muteNotifications,
+    onSelect: () => {
+      triggerHaptic('tap')
+      toggleNotificationsMuted()
+    },
+    title: notificationsMuted ? t.desktop.notificationsMuted : undefined,
+    tour: 'notifications-mute'
   }
 
   // Static system tools — always pinned to the screen's right edge so the
@@ -350,6 +371,7 @@ export function TitlebarControls({ leftTools = [], tools = [], onOpenSettings }:
           className={cn(titlebarToolClusterClass, 'right-(--titlebar-tools-right) top-(--titlebar-controls-top)')}
           data-titlebar-cluster="right"
         >
+          <TitlebarToolButton navigate={navigate} tool={notificationsTool} />
           <Slot area="titleBar.right" />
         </div>
       </>
@@ -362,7 +384,7 @@ export function TitlebarControls({ leftTools = [], tools = [], onOpenSettings }:
 
   const visibleSystemTools = appActionsSide === 'right' ? systemTools.filter(visibleTool) : []
   const visiblePaneTools = tools.filter(visibleTool)
-  const visibleRightFixedTools = [flipTool, rightSidebarTool].filter(visibleTool)
+  const visibleRightFixedTools = [flipTool, rightSidebarTool, notificationsTool].filter(visibleTool)
 
   return (
     <>

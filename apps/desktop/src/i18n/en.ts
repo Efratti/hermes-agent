@@ -4733,6 +4733,9 @@ export const en: Translations = {
 
   desktop: {
     audioReadFailed: 'Could not read recorded audio',
+    muteNotifications: 'Mute notifications',
+    notificationsMuted: 'Desktop notifications are muted until you turn them back on.',
+    unmuteNotifications: 'Unmute notifications',
     sessionUnavailable: 'Session unavailable',
     createSessionFailed: 'Could not create a new session',
     promptFailed: 'Prompt failed',
@@ -4814,6 +4817,12 @@ export const en: Translations = {
     imageAttachFailed: 'Image attach failed',
     attachFailed: 'Attach failed',
     pastedContent: 'Pasted content',
+    pastedContentLoading: 'Reading the pasted text\u2026',
+    pastedContentMissing: 'This pasted text is no longer on disk. The temporary file was cleaned up.',
+    pastedContentReadFailed: error => `Could not read the pasted text: ${error}`,
+    pastedContentTruncated: 'Only the beginning of this paste is shown here.',
+    pastedContentCopy: 'Copy full text',
+    pastedContentInsert: 'Insert into composer',
     pasteAttachFailed: 'Could not attach pasted text',
     attachImages: 'Attach images',
     clipboard: 'Clipboard',
