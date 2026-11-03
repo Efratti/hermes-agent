@@ -23,6 +23,7 @@ import { TimelineTimestamp } from '@/components/assistant-ui/thread/timeline-tim
 import { DelegateTool } from '@/components/assistant-ui/tool/delegate'
 import { ToolFallback, ToolGroupSlot } from '@/components/assistant-ui/tool/fallback'
 import { parseMaybeObject, toolCallFailed } from '@/components/assistant-ui/tool/fallback-model'
+import { hasTodoSnapshot, TodoToolCard } from '@/components/assistant-ui/tool/todo-card'
 import { formatElapsed, useElapsedSeconds, useMeasuredDuration } from '@/components/chat/activity-timer'
 import { ActivityTimerText } from '@/components/chat/activity-timer-text'
 import { GeneratedImage } from '@/components/chat/generated-image-result'
@@ -31,7 +32,6 @@ import { useI18n } from '@/i18n'
 import { mcpTargets, toolLabels } from '@/lib/connector-tools'
 import { generatedImageFromResult } from '@/lib/generated-images'
 import { separateGluedReasoningBlocks } from '@/lib/reasoning-blocks'
-import { isTodoToolName } from '@/lib/todos'
 import { type CardToolName, isCardTool, isCardToolName } from '@/lib/tool-render-class'
 import { useEnterAnimation } from '@/lib/use-enter-animation'
 import { cn } from '@/lib/utils'
@@ -77,6 +77,22 @@ const DelegateToolPart: FC<TimelineToolCallProps> = props => {
     <>
       <TimelineTimestamp className="mb-0.5 block" completedAt={props.completedAt} timestamp={props.timestamp} />
       <DelegateTool args={props.args} result={props.result} toolCallId={props.toolCallId} />
+    </>
+  )
+}
+
+const TodoToolPart: FC<TimelineToolCallProps> = props => {
+  // A write that failed, or was sealed without a result, keeps the generic row:
+  // the todo tool answers an invalid item (empty content, unknown status) with
+  // an error string the model needs to see. Only a parseable snapshot is a card.
+  if (settledWithoutResult(props) || !hasTodoSnapshot(props.result)) {
+    return <ToolFallback {...props} />
+  }
+
+  return (
+    <>
+      <TimelineTimestamp className="mb-0.5 block" completedAt={props.completedAt} timestamp={props.timestamp} />
+      <TodoToolCard result={props.result} />
     </>
   )
 }
@@ -128,7 +144,9 @@ const TOOL_CARDS: Record<CardToolName, FC<TimelineToolCallProps>> = {
   manage_catalog: CatalogInstallTool,
   manage_connections: ConnectionsToolPart,
   set_theme: ThemeToolPart,
-  setup_beat: SetupBeatToolPart
+  setup_beat: SetupBeatToolPart,
+  todo: TodoToolPart,
+  todo_list: TodoToolPart
 }
 
 // A failure the user still has to see. The gateway's tool.complete carries the
@@ -144,11 +162,6 @@ const failedCallNeedsUser = (part: TimelineToolCallProps): boolean => {
 
 const ChainToolFallback: FC<TimelineToolCallProps> = props => {
   const showToolActivity = useStore($showToolActivity)
-
-  // todo parts are hoisted to a dedicated panel above the message content.
-  if (isTodoToolName(props.toolName)) {
-    return null
-  }
 
   // An inter-agent delivery run through the terminal tool renders as the
   // compact "Messaged X" / "Message from X" notices, not a transcript row
