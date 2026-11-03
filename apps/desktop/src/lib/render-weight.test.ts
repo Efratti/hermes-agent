@@ -84,17 +84,25 @@ describe('messagePaintWeight', () => {
   })
 
   it('charges nothing for a row that renders nothing', () => {
-    const hoisted = [
-      {
-        type: 'tool-call',
-        toolName: 'todo',
-        args: { todos: Array.from({ length: 40 }, (_, i) => ({ content: `t${i}` })) }
-      },
-      { type: 'tool-call', toolName: 'react_to_message', args: { emoji: '❤️' } }
-    ]
+    const silent = [{ type: 'tool-call', toolName: 'react_to_message', args: { emoji: '❤️' } }]
 
     // Floors at 1: a message always occupies at least a row of the transcript.
-    expect(messagePaintWeight(hoisted)).toBe(1)
+    expect(messagePaintWeight(silent)).toBe(1)
+  })
+
+  it('prices a todo card as a card, not as a silent row', () => {
+    // A todo write renders a checklist card in the transcript now, so it is
+    // charged like every other card instead of being free (it used to be
+    // dropped from the transcript entirely).
+    const todoCard = [
+      {
+        type: 'tool-call',
+        toolName: 'todo_list',
+        args: { todos: Array.from({ length: 40 }, (_, i) => ({ content: `t${i}` })) }
+      }
+    ]
+
+    expect(messagePaintWeight(todoCard)).toBe(6)
   })
 
   it('keeps a tool-heavy turn far cheaper to paint than to hold', () => {

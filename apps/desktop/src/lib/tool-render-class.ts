@@ -37,7 +37,9 @@ const CARD_TOOL_NAMES = [
   'manage_catalog',
   'manage_connections',
   'set_theme',
-  'setup_beat'
+  'setup_beat',
+  'todo',
+  'todo_list'
 ] as const
 
 export type CardToolName = (typeof CARD_TOOL_NAMES)[number]
@@ -53,11 +55,11 @@ export function isCardTool(toolName: string): boolean {
   return isCardToolName(toolName) || toolName === CONNECTION_CARD_KEY || isFileEditTool(toolName)
 }
 
-// Activity tools that render nothing at all: `todo` parts are hoisted to a
-// dedicated panel above the message content, and a reaction's UI is the emoji
-// landing on the bubble. Both still render when they FAIL, which is a bounded
-// error row either way.
-const SILENT_TOOL_NAMES = new Set(['react_to_message', 'todo', 'todo_list'])
+// Activity tools that render nothing at all: a reaction's UI is the emoji
+// landing on the bubble. They still render when they FAIL, which is a bounded
+// error row either way. Todo tools used to live here — they are now cards
+// (see CARD_TOOL_NAMES) rendered in the transcript from their own result.
+const SILENT_TOOL_NAMES = new Set(['react_to_message'])
 
 export function isSilentTool(toolName: string): boolean {
   return SILENT_TOOL_NAMES.has(toolName)

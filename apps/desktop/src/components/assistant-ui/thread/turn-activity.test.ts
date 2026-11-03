@@ -49,8 +49,15 @@ describe('toolNarratesWait', () => {
   })
 
   it('does not defer to silent tools, which render nothing to narrate with', () => {
-    expect(toolNarratesWait([call('todo', false)])).toBe(false)
     expect(toolNarratesWait([call('react_to_message', false)])).toBe(false)
+  })
+
+  it('defers to a todo write — a row while pending, a card once it lands', () => {
+    // A todo call used to be silent (hoisted out of the transcript), so a wait
+    // on one was unnarrated. It renders now: an unfinished write has no result
+    // yet, so it falls back to the tool row with its own timer, and the card
+    // replaces it when the result arrives.
+    expect(toolNarratesWait([call('todo_list', false)])).toBe(true)
   })
 
   it('does not defer to a call sealed without a result', () => {
