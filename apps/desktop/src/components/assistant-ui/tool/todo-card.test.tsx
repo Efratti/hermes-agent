@@ -46,6 +46,8 @@ describe('TodoToolCard', () => {
     expect(screen.queryByText('1/3')).toBeNull()
     // Collapsed: the live step rides the header, the full roster stays closed.
     expect(screen.getByText(/Write the card/)).toBeTruthy()
+    // Truncation is visible, so the full step must stay reachable on hover.
+    expect(screen.getByText(/Write the card/).getAttribute('title')).toBe('Write the card')
     expect(screen.queryByText('Read the contract')).toBeNull()
   })
 
