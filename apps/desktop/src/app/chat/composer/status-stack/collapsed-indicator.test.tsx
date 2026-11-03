@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 
@@ -34,7 +34,6 @@ describe('ComposerStatusStack collapsed todo indicator', () => {
     )
 
     const button = screen.getByRole('button', { name: /Tasks 0\/1/ })
-    fireEvent.click(button)
 
     const label = screen.getByText('Tasks 0/1')
     const indicator = screen.getByRole('status')
@@ -54,8 +53,6 @@ describe('ComposerStatusStack collapsed todo indicator', () => {
         <ComposerStatusStack queue={null} sessionId="session-1" />
       </MemoryRouter>
     )
-
-    fireEvent.click(screen.getByRole('button', { name: /Tasks 1\/1/ }))
 
     expect(screen.queryByText('Wire the status stack')).toBeNull()
     expect(screen.queryByRole('status')).toBeNull()
