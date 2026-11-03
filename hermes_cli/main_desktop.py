@@ -1536,14 +1536,18 @@ _MESA_DRIVER_OVERRIDES = ("GALLIUM_DRIVER", "MESA_LOADER_DRIVER_OVERRIDE", "LIBG
 
 def _prefer_wsl_d3d12(env: dict) -> None:
     """Under WSLg, /dev/dxg alone does not make Mesa pick the GPU: Chromium still lands on
-    llvmpipe unless GALLIUM_DRIVER selects d3d12, and it must be set before Electron spawns
-    its GPU process (setting it from JS is too late). Explicit Mesa choices win; hosts without
-    the driver are left alone."""
+    llvmpipe unless d3d12 is selected, and it must be set before Electron spawns its GPU
+    process (setting it from JS is too late). Two knobs, because they cover different paths:
+    ``GALLIUM_DRIVER`` is what GLX reads, ``MESA_LOADER_DRIVER_OVERRIDE`` is what the EGL
+    loader reads — and Chromium reaches the GPU through EGL, so GALLIUM_DRIVER alone still
+    leaves the compositor on llvmpipe (measured: 95% of a core with only one of them).
+    Explicit Mesa choices win; hosts without the driver are left alone."""
     from hermes_constants import is_wsl
     if any(key in env for key in _MESA_DRIVER_OVERRIDES):
         return
     if is_wsl() and _WSL_DXG_DEVICE.exists() and any(driver.is_file() for driver in _WSL_D3D12_DRIVERS):
         env["GALLIUM_DRIVER"] = "d3d12"
+        env["MESA_LOADER_DRIVER_OVERRIDE"] = "d3d12"
 
 
 # Chromium's ProcessSingleton binds $TMPDIR/scoped_dirXXXXXX/SingletonSocket (33 bytes after
