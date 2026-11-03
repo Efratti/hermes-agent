@@ -108,7 +108,12 @@ const TodoCard: FC<{ revision: null | number; todos: readonly TodoItem[] }> = ({
         </span>
         <span className={SCAFFOLD_LABEL_CLASS}>{t.statusStack.todos(done, counted.length)}</span>
         {!expanded && current && (
-          <span className="min-w-0 truncate text-[length:var(--conversation-tool-font-size)] text-(--conversation-scaffold-meta)">
+          // The line truncates at whatever the column fits; the native tooltip
+          // keeps the full step reachable without opening the card.
+          <span
+            className="min-w-0 truncate text-[length:var(--conversation-tool-font-size)] text-(--conversation-scaffold-meta)"
+            title={current.content}
+          >
             · {current.content}
           </span>
         )}
