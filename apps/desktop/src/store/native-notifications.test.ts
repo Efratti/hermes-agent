@@ -5,6 +5,7 @@ import { createClientSessionState } from '@/lib/chat-runtime'
 import { $gateway } from './gateway'
 import { setHapticsMuted } from './haptics'
 import {
+  $nativeNotifyPrefs,
   clearPluginNotifyHandlers,
   dispatchNativeNotification,
   dispatchPluginNativeNotification,
@@ -16,6 +17,7 @@ import {
   setNativeNotifyEnabled,
   setNativeNotifyKind
 } from './native-notifications'
+import { setNotificationsMuted } from './notifications-muted'
 import { __resetNativeNotifyBaselineForTests, markNativeNotifyBaseline } from './notify-baseline'
 import { $approvalRequest, APPROVAL_RESPOND_REQUEST_TIMEOUT_MS, clearAllPrompts, setApprovalRequest } from './prompts'
 import { markSessionGone, resetBackgroundPollingGuard } from './runtime-gone'
@@ -55,6 +57,7 @@ beforeEach(() => {
   resetBackgroundPollingGuard()
   setWindowState({ focused: false, hidden: true })
   __resetNativeNotifyBaselineForTests()
+  setNotificationsMuted(false)
 })
 
 afterEach(() => {
@@ -295,11 +298,19 @@ describe('dispatchNativeNotification throttle', () => {
 })
 
 describe('sendTestNativeNotification', () => {
+  afterEach(() => setNotificationsMuted(false))
+
   it('fires regardless of focus or active session', () => {
     setWindowState({ focused: true, hidden: false })
     setActiveSessionId('on-screen')
     sendTestNativeNotification('Hermes', 'works')
     expect(notify).toHaveBeenCalledTimes(1)
+  })
+
+  it('stays silent while notifications are muted', async () => {
+    setNotificationsMuted(true)
+    await expect(sendTestNativeNotification('Hermes', 'works')).resolves.toBe(false)
+    expect(notify).not.toHaveBeenCalled()
   })
 })
 
@@ -382,6 +393,46 @@ describe('respondToApprovalAction', () => {
     await respondToApprovalAction('bg', 'approve')
 
     expect(request).not.toHaveBeenCalled()
+  })
+})
+
+describe('global notification mute', () => {
+  afterEach(() => setNotificationsMuted(false))
+
+  it('drops every OS notification before the IPC while muted', () => {
+    setNotificationsMuted(true)
+    const sessionId = freshSession()
+    setActiveSessionId(sessionId)
+
+    expect(dispatchNativeNotification({ kind: 'turnDone', sessionId, title: 'done' })).toBe(false)
+    expect(dispatchNativeNotification({ global: true, kind: 'backgroundDone', title: 'Your pet hatched' })).toBe(false)
+    dispatchPluginNativeNotification('muted-plugin', { title: 'Opportunity' })
+
+    expect(notify).not.toHaveBeenCalled()
+  })
+
+  it('unmuting restores delivery with the saved preferences untouched', () => {
+    setNativeNotifyKind('credits', false)
+    const saved = $nativeNotifyPrefs.get()
+    const savedSnapshot = { ...saved, kinds: { ...saved.kinds } }
+
+    setNotificationsMuted(true)
+    const mutedSession = freshSession()
+    setActiveSessionId(mutedSession)
+    expect(dispatchNativeNotification({ kind: 'turnDone', sessionId: mutedSession, title: 'done' })).toBe(false)
+    expect(notify).not.toHaveBeenCalled()
+
+    setNotificationsMuted(false)
+    const sessionId = freshSession()
+    setActiveSessionId(sessionId)
+    expect(dispatchNativeNotification({ kind: 'turnDone', sessionId, title: 'done again' })).toBe(true)
+    expect(notify).toHaveBeenCalledTimes(1)
+
+    // Muting never rewrote the preference store, so the one kind the user had
+    // turned off is still off and everything else is still on.
+    expect($nativeNotifyPrefs.get()).toEqual(savedSnapshot)
+    dispatchNativeNotification({ global: true, kind: 'credits', title: 'credits' })
+    expect(notify).toHaveBeenCalledTimes(1)
   })
 })
 

@@ -24,6 +24,7 @@ import {
   setNativeNotifyKind
 } from '@/store/native-notifications'
 import { notify } from '@/store/notifications'
+import { $notificationsMuted } from '@/store/notifications-muted'
 
 import { CONTROL_TEXT } from './constants'
 import { ListRow, SectionHeading, SettingsContent, ToggleRow } from './primitives'
@@ -90,7 +91,12 @@ export function NotificationsSettings({ subpage }: NotificationsSettingsProps = 
     }
 
     const ok = await sendTestNativeNotification(copy.testTitle, copy.testBody)
-    notify({ kind: ok ? 'info' : 'error', message: ok ? copy.testSent : copy.testUnsupported })
+    const silentBecauseMuted = !ok && $notificationsMuted.get()
+
+    notify({
+      kind: ok ? 'info' : 'error',
+      message: ok ? copy.testSent : silentBecauseMuted ? copy.testMuted : copy.testUnsupported
+    })
   }
 
   return (
