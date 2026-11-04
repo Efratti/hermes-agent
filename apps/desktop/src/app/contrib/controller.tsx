@@ -5,6 +5,7 @@ import type { CSSProperties, ReactElement, PointerEvent as ReactPointerEvent } f
 import { SessionDraftTitle } from '@/app/chat/session-draft-title'
 import { SessionStatusDot } from '@/app/chat/session-status-dot'
 import { PALETTE_AREA, type PaletteContribution, paletteToggle } from '@/app/command-palette/contrib'
+import { SessionFilesPane } from '@/app/right-sidebar/session-files'
 import { type StatusbarItem } from '@/app/shell/statusbar-controls'
 import { InlinePreviewDirective } from '@/components/assistant-ui/inline-preview-directive'
 import { IdleMount } from '@/components/idle-mount'
@@ -91,6 +92,14 @@ import {
   ownerLookupSessionRows,
   sessionMatchesStoredId
 } from '@/store/session'
+import {
+  $sessionFilesOpen,
+  SESSION_FILES_DEFAULT_WIDTH,
+  SESSION_FILES_MAX_WIDTH,
+  SESSION_FILES_MIN_WIDTH,
+  SESSION_FILES_PANE_ID,
+  toggleSessionFiles
+} from '@/store/session-files'
 import { watchSessionPins } from '@/store/session-pin-sync'
 import { $botChatScopes } from '@/store/session-states'
 import { watchUnreadWriteGuard } from '@/store/session-unread-remote'
@@ -686,6 +695,66 @@ registry.register(
     // spend itself re-asserting a value it already held.
     get: () => isPaneVisible('logs'),
     set: () => togglePaneVisible('logs')
+  })
+)
+
+// Session Files: the stable inventory behind the transcript's changed-files
+// card. Summon-only like logs — the pane exists only while
+// `$sessionFilesOpen` is on, so no preset or adoption path resurrects it. The
+// card's "All files in this session" link and the palette row are its doors.
+let unregisterSessionFilesPane: (() => void) | null = null
+
+const syncSessionFilesPane = (open: boolean) => {
+  if (open) {
+    unregisterSessionFilesPane ??= registry.register({
+      id: SESSION_FILES_PANE_ID,
+      area: 'panes',
+      title: translateNow('sidebar.sessionFiles'),
+      // Its own column on the right, against the chat: the panel is an
+      // inventory to keep in view while reviewing, not a tab behind the file
+      // tree. Workspace-independent — a session can edit files with no project
+      // open.
+      data: {
+        placement: 'right',
+        collapsible: true,
+        dock: { pane: 'workspace', pos: 'right' },
+        width: SESSION_FILES_DEFAULT_WIDTH,
+        minWidth: SESSION_FILES_MIN_WIDTH,
+        maxWidth: SESSION_FILES_MAX_WIDTH,
+        tabTitle: () => <LocalizedTabTitle select={t => t.sidebar.sessionFiles} />,
+        tabTitleText: () => translateNow('sidebar.sessionFiles')
+      },
+      render: () => idle(<SessionFilesPane />)
+    })
+    revealTreePane(SESSION_FILES_PANE_ID)
+  } else {
+    unregisterSessionFilesPane?.()
+    unregisterSessionFilesPane = null
+
+    const tree = $layoutTree.get()
+
+    if (tree && allPaneIds(tree).includes(SESSION_FILES_PANE_ID)) {
+      removeTreePane(SESSION_FILES_PANE_ID)
+    }
+  }
+}
+
+markCollapsePane(SESSION_FILES_PANE_ID)
+registerPaneCloser(SESSION_FILES_PANE_ID, () => $sessionFilesOpen.set(false))
+registerPaneOpener(SESSION_FILES_PANE_ID, () => $sessionFilesOpen.set(true))
+syncSessionFilesPane($sessionFilesOpen.get())
+$sessionFilesOpen.listen(syncSessionFilesPane)
+
+registry.register(
+  paletteToggle({
+    id: 'sessionFiles.toggle',
+    label: 'Toggle session files',
+    icon: FileText,
+    keywords: ['files', 'changed', 'touched', 'session', 'diff', 'inventory'],
+    // On-screen truth, same contract as the logs row: the pane can be closed
+    // from its tab, and the store must not disagree with what the user sees.
+    get: () => isPaneVisible(SESSION_FILES_PANE_ID),
+    set: () => toggleSessionFiles()
   })
 )
 

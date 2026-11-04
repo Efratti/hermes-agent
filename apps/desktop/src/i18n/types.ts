@@ -2827,6 +2827,7 @@ export interface Translations extends NoticeTranslations {
     terminal: string
     files: string
     review: string
+    sessionFiles: string
     logs: string
     cronJobs: string
     groupAriaGrouped: string
@@ -3693,6 +3694,28 @@ export interface Translations extends NoticeTranslations {
     }
   }
 
+  sessionFiles: {
+    aria: string
+    title: string
+    close: string
+    summary: (files: number, turns: number) => string
+    fileCount: (count: number) => string
+    /** Shown above the list while a turn is still streaming. */
+    busyNote: string
+    emptyTitle: string
+    emptyBody: string
+    /** Second line of a file that sits directly in the session root. */
+    workspaceRoot: string
+    untitledTurn: string
+    openDiff: string
+    openFile: string
+    status: {
+      created: string
+      deleted: string
+      modified: string
+    }
+  }
+
   rightSidebar: RightSidebarTranslations
 
   preview: {
@@ -4003,6 +4026,7 @@ export interface Translations extends NoticeTranslations {
       errorOpenDesktopLogs: string
       errorSendDiagnostics: string
       filesChanged: (count: number) => string
+      allSessionFiles: string
       reviewChanges: string
       readAloudFailed: string
       preparingAudio: string

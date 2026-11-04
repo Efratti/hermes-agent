@@ -3219,6 +3219,7 @@ export const en: Translations = {
     terminal: 'Terminal',
     files: 'Files',
     review: 'Review',
+    sessionFiles: 'Session files',
     logs: 'Logs',
     cronJobs: 'Cron jobs',
     groupAriaGrouped: 'Show sessions as a single list',
@@ -4228,6 +4229,27 @@ export const en: Translations = {
     }
   },
 
+  sessionFiles: {
+    aria: 'Session files',
+    title: 'Session files',
+    close: 'Close session files',
+    summary: (files: number, turns: number) =>
+      `${files} ${files === 1 ? 'file' : 'files'} · ${turns} ${turns === 1 ? 'turn' : 'turns'}`,
+    fileCount: (count: number) => `${count} ${count === 1 ? 'file' : 'files'}`,
+    busyNote: 'The running turn appears here when it settles.',
+    emptyTitle: 'No files yet',
+    emptyBody: 'Files this session creates or edits will be listed here, grouped by turn.',
+    workspaceRoot: 'Workspace root',
+    untitledTurn: 'Session start',
+    openDiff: 'Open diff',
+    openFile: 'Open file',
+    status: {
+      created: 'Created',
+      deleted: 'Deleted',
+      modified: 'Modified'
+    }
+  },
+
   rightSidebar: {
     terminalReadOnly: 'Read-only output',
     terminalReadOnlyHelp:
@@ -4520,6 +4542,7 @@ export const en: Translations = {
       errorOpenDesktopLogs: 'Open Desktop logs',
       errorSendDiagnostics: 'Send diagnostics',
       filesChanged: count => (count === 1 ? '1 file changed' : `${count} files changed`),
+      allSessionFiles: 'All files in this session',
       reviewChanges: 'Review',
       readAloudFailed: 'Read aloud failed',
       preparingAudio: 'Preparing audio...',

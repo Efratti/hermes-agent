@@ -222,16 +222,23 @@ def test_approve_refuses_staged_remove_whose_entry_changed(hermes_home, shape):
     from tools.memory_tool import load_on_disk_store, memory_tool
     from tools import write_approval as wa
     store, pid = _review_stages_remove(shape)
+    # The live queue shows the whole entry a proposal targets, not just its search string.
+    assert _REVIEWED in (handle_pending_subcommand(wa.MEMORY, ["pending"]) or "")
     newer = "Staging DB: pg-staging-3 (migrated 2026-09-20, creds in vault 'stg')"
     assert json.loads(memory_tool(action="patch", old_text=_REVIEWED, content=newer, store=store))["success"]
 
     out = handle_pending_subcommand(wa.MEMORY, ["approve", pid], memory_store=load_on_disk_store())
 
-    assert load_on_disk_store().memory_entries == [_KEPT, newer], out
+    # A mixed batch now lands its adds at staging time (batch split, #117894); only the gated
+    # remove waits for approval, so the staged batch's add is already in the file.
+    expected = [_KEPT, newer] + (["Deploys via make ship"] if shape == "batch" else [])
+    assert load_on_disk_store().memory_entries == expected, out
     assert "changed since it was staged" in out
     assert wa.get_pending(wa.MEMORY, pid) is not None
-    # The pending list shows the whole entry the write targets, not just its search string.
-    assert _REVIEWED in handle_pending_subcommand(wa.MEMORY, ["pending"])
+    # On the next read the now-unappliable record leaves the queue, and the notice says so.
+    listing = handle_pending_subcommand(wa.MEMORY, ["pending"]) or ""
+    assert "No pending memory writes." in listing
+    assert "1 stale" in listing
 
 
 @pytest.mark.parametrize("shape", ["single", "batch"])
@@ -247,8 +254,8 @@ def test_approve_names_the_entry_a_remove_deleted(hermes_home, shape):
 
 
 def test_approve_refuses_unpinned_legacy_remove(hermes_home):
-    """A record staged before removes were pinned to their full entry has no verifiable target,
-    so approve refuses it (keeping the record) instead of replaying its old_text search."""
+    """A record staged before removes were pinned to their full entry has no verifiable target:
+    approve refuses it, and the next queue read sweeps it as stale instead of listing it forever."""
     from hermes_cli.write_approval_commands import handle_pending_subcommand
     from tools.memory_tool import load_on_disk_store
     from tools import write_approval as wa
@@ -257,13 +264,17 @@ def test_approve_refuses_unpinned_legacy_remove(hermes_home):
     record = json.loads(path.read_text(encoding="utf-8"))
     record["payload"].pop("matched_entry", None)
     path.write_text(json.dumps(record), encoding="utf-8")
-    assert "unpinned legacy target" in handle_pending_subcommand(wa.MEMORY, ["pending"])
 
     out = handle_pending_subcommand(wa.MEMORY, ["approve", pid], memory_store=load_on_disk_store())
 
     assert "Approved 0" in out and "predates entry pinning" in out, out
     assert _REVIEWED in load_on_disk_store().memory_entries
     assert wa.get_pending(wa.MEMORY, pid) is not None
+    listing = handle_pending_subcommand(wa.MEMORY, ["pending"]) or ""
+    assert "No pending memory writes." in listing
+    assert "1 stale" in listing
+
+    assert (wa._discard_dir(wa.MEMORY) / f"{pid}.json").exists()
 
 def test_handle_approval_on(hermes_home):
     from hermes_cli.write_approval_commands import handle_pending_subcommand
@@ -422,7 +433,9 @@ def test_staged_hint_names_the_pending_dir_on_headless_surfaces(hermes_home, mon
     assert "review with /memory pending" not in r["message"], r["message"]
     assert "pending records live in" in r["message"]
     monkeypatch.delenv("HERMES_SESSION_PLATFORM")
-    assert wa.pending_count("memory") == 3
+    # The same proposal staged three times supersedes itself, so the queue holds one record
+    # (supersession, not accumulation) while every call still reports the staged hint.
+    assert wa.pending_count("memory") == 1
 
 
 def test_staged_hint_keeps_command_for_chat_gateway_platform(hermes_home, monkeypatch):

@@ -1004,7 +1004,9 @@ class TestBackgroundReviewDeleteGate:
         # Fail-closed: the original entry is untouched.
         assert "entry the fork must not rewrite" in store._entries_for("memory")
 
-    def test_batch_containing_remove_staged_whole_batch(self, store, tmp_path, monkeypatch):
+    def test_batch_with_remove_lands_its_adds_and_stages_only_the_gated_op(self, store, tmp_path, monkeypatch):
+        """Batch poisoning (#117894): a gated op used to stage the whole batch, so every add
+        riding in it was silently withheld. Adds are independent and must land."""
         monkeypatch.setenv("HERMES_HOME", str(tmp_path))
         store.add("memory", "rule one")
         token = set_current_write_origin("background_review")
@@ -1016,8 +1018,14 @@ class TestBackgroundReviewDeleteGate:
         finally:
             reset_current_write_origin(token)
         assert result["staged"] is True
-        # Atomic: the batch is only a proposal — its add must not land either.
-        assert "fork consolidation" not in store._entries_for("memory")
+        assert result["applied_adds"] == 1
+        # The fact lands; the destructive half stays a proposal.
+        assert "fork consolidation" in store._entries_for("memory")
+        assert "rule one" in store._entries_for("memory")
+        from tools import write_approval as wa
+        record = wa.get_pending(wa.MEMORY, result["pending_id"])
+        assert record is not None
+        assert [op["action"] for op in record["payload"]["operations"]] == ["remove"]
 
     def test_add_still_allowed_in_background_review(self, store):
         token = set_current_write_origin("background_review")
