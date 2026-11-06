@@ -56,7 +56,7 @@ function diffStatus(diff: string): ChangedFileStatus {
 
 /** Creation outranks modification (a turn that creates and then edits a file
  *  created it); deletion outranks both (that is where the file ended up). */
-function mergeStatus(previous: ChangedFileStatus, next: ChangedFileStatus): ChangedFileStatus {
+export function mergeStatus(previous: ChangedFileStatus, next: ChangedFileStatus): ChangedFileStatus {
   if (next === 'deleted' || previous === 'deleted') {
     return 'deleted'
   }

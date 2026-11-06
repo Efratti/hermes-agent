@@ -4236,6 +4236,12 @@ export const en: Translations = {
     summary: (files: number, turns: number) =>
       `${files} ${files === 1 ? 'file' : 'files'} · ${turns} ${turns === 1 ? 'turn' : 'turns'}`,
     fileCount: (count: number) => `${count} ${count === 1 ? 'file' : 'files'}`,
+    groupByFile: 'Group by file',
+    groupByTurn: 'Group by turn',
+    filterPlaceholder: 'Filter files',
+    filterAria: 'Filter session files',
+    noMatch: (query: string) => `No file matches “${query}”`,
+    touches: (count: number) => `${count} ${count === 1 ? 'turn' : 'turns'}`,
     busyNote: 'The running turn appears here when it settles.',
     emptyTitle: 'No files yet',
     emptyBody: 'Files this session creates or edits will be listed here, grouped by turn.',

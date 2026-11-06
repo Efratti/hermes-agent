@@ -4,7 +4,7 @@
 
 import { type ChatMessage, chatMessageText } from '@/lib/chat-messages'
 
-import { type ChangedFile, deriveChangedFiles } from './changed-files'
+import { type ChangedFile, deriveChangedFiles, mergeStatus } from './changed-files'
 
 export interface SessionFileTurn {
   /** Unix seconds the turn's prompt was sent, when stamped. */
@@ -111,4 +111,73 @@ export function deriveSessionFileTurns(messages: readonly ChatMessage[]): Sessio
   flush()
 
   return turns.reverse()
+}
+
+export interface SessionFileAggregate {
+  /** Merged view of every touch of this path: summed churn, merged status,
+   *  newest timestamp. A copy — never the turn's own ChangedFile object. */
+  file: ChangedFile
+  /** Turns that touched it, most recent first. */
+  turnIds: string[]
+}
+
+/** Collapse a turn-grouped inventory into one row per path: churn adds up
+ *  across turns, status merges (a file created early still reads as created),
+ *  time is the newest touch, and the row order is that same newest touch. */
+export function aggregateSessionFiles(turns: readonly SessionFileTurn[]): SessionFileAggregate[] {
+  const byPath = new Map<string, SessionFileAggregate>()
+
+  for (const turn of turns) {
+    for (const file of turn.files) {
+      const existing = byPath.get(file.path)
+
+      if (!existing) {
+        byPath.set(file.path, { file: { ...file }, turnIds: [turn.id] })
+
+        continue
+      }
+
+      existing.file.added += file.added
+      existing.file.removed += file.removed
+      existing.file.status = mergeStatus(existing.file.status, file.status)
+      existing.turnIds.push(turn.id)
+
+      if ((file.at ?? 0) > (existing.file.at ?? 0)) {
+        existing.file.at = file.at
+      }
+    }
+  }
+
+  return [...byPath.values()].sort((a, b) => (b.file.at ?? 0) - (a.file.at ?? 0))
+}
+
+/** Case-insensitive substring match on the path as the tool reported it;
+ *  an empty or whitespace query matches everything. */
+export function matchesFileQuery(path: string, query: string): boolean {
+  const needle = query.trim().toLowerCase()
+
+  return needle === '' || path.toLowerCase().includes(needle)
+}
+
+/** Keeps only matching files, and drops turns left with none. Turn labels and
+ *  ids survive, so collapsed groups stay collapsed across a filter change. */
+export function filterSessionFileTurns(turns: readonly SessionFileTurn[], query: string): SessionFileTurn[] {
+  if (query.trim() === '') {
+    return turns as SessionFileTurn[]
+  }
+
+  return turns.flatMap(turn => {
+    const files = turn.files.filter(file => matchesFileQuery(file.path, query))
+
+    return files.length === 0 ? [] : [{ ...turn, files }]
+  })
+}
+
+export function filterSessionFileAggregates(
+  rows: readonly SessionFileAggregate[],
+  query: string
+): SessionFileAggregate[] {
+  return query.trim() === ''
+    ? (rows as SessionFileAggregate[])
+    : rows.filter(row => matchesFileQuery(row.file.path, query))
 }

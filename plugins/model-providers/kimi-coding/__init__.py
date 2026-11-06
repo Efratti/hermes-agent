@@ -65,16 +65,19 @@ class KimiProfile(ProviderProfile):
         return extra_body, top_level
 
 
-def _kimi(name: str, aliases: tuple, env_vars: tuple, base_url: str) -> KimiProfile:
+def _kimi(name: str, aliases: tuple, env_vars: tuple, base_url: str, models_url: str = "") -> KimiProfile:
     return KimiProfile(
-        name=name, aliases=aliases, env_vars=env_vars, base_url=base_url,
+        name=name, aliases=aliases, env_vars=env_vars, base_url=base_url, models_url=models_url,
         fixed_temperature=OMIT_TEMPERATURE, default_max_tokens=32000,
         default_headers=LazyHeaders(_HEADERS), default_aux_model="kimi-k2-turbo-preview",
     )
 
 
+# The paid Kimi Code plan serves its own catalog (k3.1-pro, k3.1-pro-highspeed, k3, …) at
+# api.kimi.com/coding/v1/models — the Moonshot platform catalog at api.moonshot.ai/v1 lists
+# only the legacy K2.x/K3 ids, so discovery must point at the coding surface.
 kimi = _kimi("kimi-coding", ("kimi", "moonshot", "kimi-for-coding"), ("KIMI_API_KEY", "KIMI_CODING_API_KEY"),
-             "https://api.moonshot.ai/v1")
+             "https://api.moonshot.ai/v1", models_url="https://api.kimi.com/coding/v1/models")
 kimi_cn = _kimi("kimi-coding-cn", ("kimi-cn", "moonshot-cn"), ("KIMI_CN_API_KEY",), "https://api.moonshot.cn/v1")
 
 register_provider(kimi)

@@ -49,6 +49,9 @@ export interface SessionFileRowActions {
 interface SessionFileRowProps {
   actions: SessionFileRowActions
   file: ChangedFile
+  /** Pane-only suffix on the directory line (e.g. "3 turns"). Missing leaves
+   *  the line untouched, so the transcript card is unaffected. */
+  meta?: string
   /** Session root, so a file under it reads as a repo-relative directory.
    *  Only the pane variant renders a directory, so the card omits it. */
   scopeCwd?: null | string
@@ -71,7 +74,7 @@ export function fileRowLabel(name: string, status: string, added: number, remove
  * two filesystem actions plus copy, and stays out of the way until the row is
  * hovered or focused so the name keeps its room at 380px.
  */
-export function SessionFileRow({ actions, file, scopeCwd, variant }: SessionFileRowProps) {
+export function SessionFileRow({ actions, file, meta, scopeCwd, variant }: SessionFileRowProps) {
   const { t } = useI18n()
   const s = t.sessionFiles
   const pane = variant === 'pane'
@@ -139,7 +142,7 @@ export function SessionFileRow({ actions, file, scopeCwd, variant }: SessionFile
                   className="min-w-0 truncate text-[0.6875rem] leading-4 text-(--ui-text-tertiary)"
                   data-session-file-path=""
                 >
-                  {directory || s.workspaceRoot}
+                  {directory || s.workspaceRoot}{meta ? ` · ${meta}` : ''}
                 </span>
               </OverflowTip>
               {time ? (

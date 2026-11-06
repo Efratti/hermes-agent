@@ -3700,6 +3700,12 @@ export interface Translations extends NoticeTranslations {
     close: string
     summary: (files: number, turns: number) => string
     fileCount: (count: number) => string
+    groupByFile: string
+    groupByTurn: string
+    filterPlaceholder: string
+    filterAria: string
+    noMatch: (query: string) => string
+    touches: (count: number) => string
     /** Shown above the list while a turn is still streaming. */
     busyNote: string
     emptyTitle: string

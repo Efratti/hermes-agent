@@ -36,6 +36,7 @@ const CARD_TOOL_NAMES = [
   'image_generate',
   'manage_catalog',
   'manage_connections',
+  'plan_mode',
   'set_theme',
   'setup_beat',
   'todo',

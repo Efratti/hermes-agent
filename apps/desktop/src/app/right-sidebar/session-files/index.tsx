@@ -3,7 +3,11 @@ import { useMemo, useState } from 'react'
 
 import type { ChangedFile } from '@/components/assistant-ui/thread/changed-files'
 import { FOCUS_RING, SessionFileRow } from '@/components/assistant-ui/thread/session-file-row'
-import { deriveSessionFileTurns } from '@/components/assistant-ui/thread/session-files'
+import {
+  aggregateSessionFiles,
+  filterSessionFileAggregates,
+  filterSessionFileTurns
+} from '@/components/assistant-ui/thread/session-files'
 import { Button } from '@/components/ui/button'
 import { Codicon } from '@/components/ui/codicon'
 import {
@@ -13,6 +17,7 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger
 } from '@/components/ui/context-menu'
+import { Input } from '@/components/ui/input'
 import { Tip } from '@/components/ui/tooltip'
 import { useI18n } from '@/i18n'
 import type { ChatMessage } from '@/lib/chat-messages'
@@ -23,12 +28,20 @@ import { copyFilePath, revealFile } from '@/store/file-actions'
 import { $panesFlipped } from '@/store/layout'
 import { openReviewForPath } from '@/store/review'
 import { $activeSessionId, $messages } from '@/store/session'
-import { $sessionFilesTarget, closeSessionFiles, type SessionFilesTarget } from '@/store/session-files'
+import {
+  $sessionFilesTarget,
+  $sessionFilesView,
+  closeSessionFiles,
+  type SessionFilesTarget,
+  setSessionFilesView
+} from '@/store/session-files'
 import { $sessionStates } from '@/store/session-states'
 
 import { SidebarPanelLabel } from '../../shell/sidebar-label'
 import { pickRevealLabel } from '../file-actions'
 import { RightSidebarSectionHeader } from '../index'
+
+import { useSessionTurns } from './use-session-turns'
 
 const EMPTY_MESSAGES: ChatMessage[] = []
 
@@ -63,10 +76,13 @@ function resolveRuntimeId(
  *  every action the hover rail offers. */
 function SessionFileEntry({
   file,
+  meta,
   revealLabel,
   scopeCwd
 }: {
   file: ChangedFile
+  /** Pane-only suffix on the directory line, e.g. "3 turns". */
+  meta?: string
   revealLabel: string
   scopeCwd: null | string
 }) {
@@ -84,6 +100,7 @@ function SessionFileEntry({
           <SessionFileRow
             actions={{ onOpen, onOpenDiff: onDiff, onReveal, revealLabel }}
             file={file}
+            meta={meta}
             scopeCwd={scopeCwd}
             variant="pane"
           />
@@ -109,6 +126,9 @@ function SessionFileEntry({
  * while this panel accumulates. It derives from the same message parts the
  * card already reads, so there is no new state to persist and nothing to keep
  * in sync — open it, and the transcript is the source of truth.
+ *
+ * The flat By file view answers the other question a long session raises:
+ * "how much did this one file change?" — one row per path, totalled churn.
  */
 export function SessionFilesPane() {
   const { t } = useI18n()
@@ -118,7 +138,9 @@ export function SessionFilesPane() {
   const activeRuntimeId = useStore($activeSessionId)
   const draftMessages = useStore($messages)
   const target = useStore($sessionFilesTarget)
+  const view = useStore($sessionFilesView)
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set())
+  const [query, setQuery] = useState('')
 
   const runtimeId = resolveRuntimeId(target, states, activeRuntimeId)
   const state = runtimeId ? states[runtimeId] : undefined
@@ -138,8 +160,17 @@ export function SessionFilesPane() {
   const busy = Boolean(state?.busy)
   const settled = busy && messages[messages.length - 1]?.role === 'assistant' ? messages.slice(0, -1) : messages
 
-  const turns = useMemo(() => deriveSessionFileTurns(settled), [settled])
-  const fileCount = turns.reduce((total, turn) => total + turn.files.length, 0)
+  const turns = useSessionTurns(settled)
+  // Lazy on purpose: the flat view's aggregation is not paid while the panel
+  // is grouped by turn, which is the default and the streaming path.
+  const rows = useMemo(() => (view === 'file' ? aggregateSessionFiles(turns) : []), [turns, view])
+  const visibleTurns = useMemo(() => filterSessionFileTurns(turns, query), [turns, query])
+  const visibleRows = useMemo(() => filterSessionFileAggregates(rows, query), [rows, query])
+
+  const fileCount =
+    view === 'file' ? visibleRows.length : visibleTurns.reduce((total, turn) => total + turn.files.length, 0)
+
+  const turnCount = view === 'file' ? new Set(visibleRows.flatMap(row => row.turnIds)).size : visibleTurns.length
   const revealLabel = pickRevealLabel(t.fileMenu.revealFinder, t.fileMenu.revealExplorer, t.fileMenu.revealFileManager)
 
   const toggleTurn = (id: string) => {
@@ -171,10 +202,21 @@ export function SessionFilesPane() {
           <SidebarPanelLabel data-pane-self-label="">{s.title}</SidebarPanelLabel>
           {fileCount > 0 && (
             <span className="shrink-0 truncate text-[0.6875rem] tabular-nums text-(--ui-text-quaternary)">
-              {s.summary(fileCount, turns.length)}
+              {s.summary(fileCount, turnCount)}
             </span>
           )}
         </div>
+        <Tip label={view === 'file' ? s.groupByTurn : s.groupByFile}>
+          <Button
+            aria-label={view === 'file' ? s.groupByTurn : s.groupByFile}
+            className={cn('size-6', FOCUS_RING)}
+            onClick={() => setSessionFilesView(view === 'file' ? 'turn' : 'file')}
+            size="icon-xs"
+            variant="ghost"
+          >
+            <Codicon name={view === 'file' ? 'list-unordered' : 'list-flat'} size="0.8125rem" />
+          </Button>
+        </Tip>
         <Tip label={s.close}>
           <Button
             aria-label={s.close}
@@ -187,6 +229,26 @@ export function SessionFilesPane() {
           </Button>
         </Tip>
       </RightSidebarSectionHeader>
+
+      {/* Only rendered once there is something to filter: an empty session
+          keeps its empty state instead of gaining dead chrome. */}
+      {turns.length > 0 && (
+        <div className="shrink-0 px-2.5 pb-2">
+          <Input
+            aria-label={s.filterAria}
+            className="h-6 text-[0.6875rem]"
+            onChange={event => setQuery(event.target.value)}
+            onKeyDown={event => {
+              if (event.key === 'Escape') {
+                setQuery('')
+              }
+            }}
+            placeholder={s.filterPlaceholder}
+            prefix={<Codicon name="search" size="0.75rem" />}
+            value={query}
+          />
+        </div>
+      )}
 
       {hydrating ? (
         <div className="flex min-h-0 flex-1 items-center justify-center gap-2 px-6 text-[0.6875rem] text-(--ui-text-tertiary)">
@@ -220,54 +282,73 @@ export function SessionFilesPane() {
               {s.busyNote}
             </div>
           )}
-          {turns.map(turn => {
-            const isCollapsed = collapsed.has(turn.id)
+          {fileCount === 0 ? (
+            <div className="flex flex-col items-center justify-center gap-2 px-6 py-10 text-center">
+              <Codicon className="text-(--ui-text-quaternary)" name="search" size="1.125rem" />
+              <div className="text-[0.75rem] font-semibold text-(--ui-text-secondary)">{s.noMatch(query.trim())}</div>
+            </div>
+          ) : view === 'file' ? (
+            <div className="mt-1.5 mb-2 flex flex-col gap-1 px-2.5">
+              {visibleRows.map(row => (
+                <SessionFileEntry
+                  file={row.file}
+                  key={row.file.path}
+                  meta={row.turnIds.length > 1 ? s.touches(row.turnIds.length) : undefined}
+                  revealLabel={revealLabel}
+                  scopeCwd={scopeCwd}
+                />
+              ))}
+            </div>
+          ) : (
+            visibleTurns.map(turn => {
+              const isCollapsed = collapsed.has(turn.id)
 
-            return (
-              // The header sticks to the top of the scroll box so a long record
-              // stays oriented while rows scroll under it. A <button> sizes
-              // `auto` as fit-content, so it needs an explicit full width.
-              <section key={turn.id}>
-                <button
-                  aria-expanded={!isCollapsed}
-                  className={cn(
-                    'sticky top-0 z-10 flex w-full items-center gap-2 border-b border-(--ui-stroke-secondary) bg-(--ui-sidebar-surface-background) px-2.5 py-1.5 text-left outline-none',
-                    FOCUS_RING
-                  )}
-                  data-session-turn={turn.id}
-                  onClick={() => toggleTurn(turn.id)}
-                  type="button"
-                >
-                  <Codicon
-                    className="shrink-0 text-(--ui-text-quaternary)"
-                    name={isCollapsed ? 'chevron-right' : 'chevron-down'}
-                    size="0.8125rem"
-                  />
-                  <span className="min-w-0 flex-1 truncate text-[0.71875rem] leading-4 font-semibold text-(--ui-text-secondary)">
-                    {turn.label || s.untitledTurn}
-                  </span>
-                  <span className="shrink-0 rounded-full border border-(--ui-stroke-secondary) px-1.5 text-[0.625rem] leading-4 tabular-nums text-(--ui-text-tertiary)">
-                    {s.fileCount(turn.files.length)}
-                  </span>
-                  {turn.at !== undefined && (
-                    <span
-                      className="shrink-0 text-[0.65625rem] leading-4 tabular-nums text-(--ui-text-tertiary)"
-                      title={fmtFullDateTime.format(new Date(turn.at * 1000))}
-                    >
-                      {fmtDayTime.format(new Date(turn.at * 1000))}
+              return (
+                // The header sticks to the top of the scroll box so a long record
+                // stays oriented while rows scroll under it. A <button> sizes
+                // `auto` as fit-content, so it needs an explicit full width.
+                <section key={turn.id}>
+                  <button
+                    aria-expanded={!isCollapsed}
+                    className={cn(
+                      'sticky top-0 z-10 flex w-full items-center gap-2 border-b border-(--ui-stroke-secondary) bg-(--ui-sidebar-surface-background) px-2.5 py-1.5 text-left outline-none',
+                      FOCUS_RING
+                    )}
+                    data-session-turn={turn.id}
+                    onClick={() => toggleTurn(turn.id)}
+                    type="button"
+                  >
+                    <Codicon
+                      className="shrink-0 text-(--ui-text-quaternary)"
+                      name={isCollapsed ? 'chevron-right' : 'chevron-down'}
+                      size="0.8125rem"
+                    />
+                    <span className="min-w-0 flex-1 truncate text-[0.71875rem] leading-4 font-semibold text-(--ui-text-secondary)">
+                      {turn.label || s.untitledTurn}
                     </span>
+                    <span className="shrink-0 rounded-full border border-(--ui-stroke-secondary) px-1.5 text-[0.625rem] leading-4 tabular-nums text-(--ui-text-tertiary)">
+                      {s.fileCount(turn.files.length)}
+                    </span>
+                    {turn.at !== undefined && (
+                      <span
+                        className="shrink-0 text-[0.65625rem] leading-4 tabular-nums text-(--ui-text-tertiary)"
+                        title={fmtFullDateTime.format(new Date(turn.at * 1000))}
+                      >
+                        {fmtDayTime.format(new Date(turn.at * 1000))}
+                      </span>
+                    )}
+                  </button>
+                  {!isCollapsed && (
+                    <div className="mt-1.5 mb-2 flex flex-col gap-1 px-2.5">
+                      {turn.files.map(file => (
+                        <SessionFileEntry file={file} key={file.path} revealLabel={revealLabel} scopeCwd={scopeCwd} />
+                      ))}
+                    </div>
                   )}
-                </button>
-                {!isCollapsed && (
-                  <div className="mt-1.5 mb-2 flex flex-col gap-1 px-2.5">
-                    {turn.files.map(file => (
-                      <SessionFileEntry file={file} key={file.path} revealLabel={revealLabel} scopeCwd={scopeCwd} />
-                    ))}
-                  </div>
-                )}
-              </section>
-            )
-          })}
+                </section>
+              )
+            })
+          )}
         </div>
       )}
     </aside>

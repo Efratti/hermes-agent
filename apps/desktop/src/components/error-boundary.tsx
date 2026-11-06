@@ -32,11 +32,24 @@ const ASSISTANT_UI_LOOKUP_ERROR = /(useClientLookup|tapClient(Lookup|Resource)).
 // itself inside whatever boundary hosts the portal, so every boundary — not
 // just the root — gets the same capped recovery.
 const PORTAL_UNMOUNT_ERROR = /^Tried to unmount a fiber (?:that is already|that was not) unmounted/u
+
+// A translation layer (Google Translate's extension, Chrome's own translate)
+// reparents the nodes React owns; React's commit then asks the DOM to move a
+// node it no longer has there. lib/foreign-dom-guard.ts absorbs those calls, so
+// this class should not escape any more — but a throw from a path the guard
+// cannot see still lands here, and it must not cost the pane. Same capped
+// recovery as the portal race: the fiber graph settles on the next render.
+const FOREIGN_DOM_MUTATION_ERROR =
+  /^Failed to execute '(?:removeChild|insertBefore|replaceChild)' on 'Node': The node (?:to be removed|before which the new node is to be inserted|to be replaced) is not a child of this node/u
+
 const MAX_AUTO_RECOVERIES = 3
 const AUTO_RECOVERY_WINDOW_MS = 5_000
+const BOUNDARY_REPORTS_KEY = '__hermesBoundaryErrors'
+const BOUNDARY_REPORT_LIMIT = 20
 
 const isTransientAssistantUiLookupError = (error: Error): boolean => ASSISTANT_UI_LOOKUP_ERROR.test(error.message)
 const isTransientPortalUnmountError = (error: Error): boolean => PORTAL_UNMOUNT_ERROR.test(error.message)
+const isForeignDomMutationError = (error: Error): boolean => FOREIGN_DOM_MUTATION_ERROR.test(error.message)
 
 export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
   state: ErrorBoundaryState = { error: null }
@@ -63,6 +76,29 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
     const tag = label ? `[error-boundary:${label}]` : '[error-boundary]'
     console.error(tag, error, info.componentStack)
 
+    // The Webapp has no Electron bridge, so a browser-only crash never reaches
+    // desktop.log. Keep a bounded ring buffer on the window instead: reading
+    // `window.__hermesBoundaryErrors` in devtools names the pane, the message
+    // and the component stack of the last failures.
+    try {
+      const scope = window as unknown as Record<string, unknown>
+      const reports = (scope[BOUNDARY_REPORTS_KEY] ??= []) as unknown[]
+
+      reports.push({
+        boundary: label || 'unlabeled',
+        message: error.message,
+        stack: error.stack ?? '',
+        componentStack: info.componentStack ?? '',
+        at: Date.now(),
+      })
+
+      if (reports.length > BOUNDARY_REPORT_LIMIT) {
+        reports.splice(0, reports.length - BOUNDARY_REPORT_LIMIT)
+      }
+    } catch {
+      // Diagnostics must never take the boundary down with them.
+    }
+
     // Persist to desktop.log via Electron (#79428): console.error only reaches
     // the main process for windows with a console hook, is minified, and loses
     // the component stack. This survives the window and names the component.
@@ -81,9 +117,15 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
 
     const assistantUiLookupRace = this.props.label === 'root' && isTransientAssistantUiLookupError(error)
     const portalTeardownRace = isTransientPortalUnmountError(error)
+    const foreignDomMutation = isForeignDomMutationError(error)
 
-    if ((assistantUiLookupRace || portalTeardownRace) && this.takeAutoRecoveryAttempt()) {
-      const race = portalTeardownRace ? 'portal teardown' : 'assistant-ui lookup'
+    if ((assistantUiLookupRace || portalTeardownRace || foreignDomMutation) && this.takeAutoRecoveryAttempt()) {
+      const race = portalTeardownRace
+        ? 'portal teardown'
+        : foreignDomMutation
+          ? 'foreign DOM mutation'
+          : 'assistant-ui lookup'
+
       console.warn(`${tag} auto-recovering from ${race} render race`, error.message)
       this.autoRecoveryPending = true
       this.scheduleAutoRecovery()

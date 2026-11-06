@@ -23,6 +23,7 @@ import { TimelineTimestamp } from '@/components/assistant-ui/thread/timeline-tim
 import { DelegateTool } from '@/components/assistant-ui/tool/delegate'
 import { ToolFallback, ToolGroupSlot } from '@/components/assistant-ui/tool/fallback'
 import { parseMaybeObject, toolCallFailed } from '@/components/assistant-ui/tool/fallback-model'
+import { planPathFromResult, PlanToolCard } from '@/components/assistant-ui/tool/plan-card'
 import { hasTodoSnapshot, TodoToolCard } from '@/components/assistant-ui/tool/todo-card'
 import { formatElapsed, useElapsedSeconds, useMeasuredDuration } from '@/components/chat/activity-timer'
 import { ActivityTimerText } from '@/components/chat/activity-timer-text'
@@ -137,12 +138,22 @@ const SetupBeatToolPart: FC<TimelineToolCallProps> = props => {
 const ConnectionsToolPart: FC<TimelineToolCallProps> = props =>
   mcpTargets(props.toolName, props.args).length > 0 ? <McpSetupTool {...props} /> : <ConnectorTool {...props} />
 
+/** Plan mode's submission: the deliverable is a file, so show the file.
+ *  A result that names no plan file is not a submission (status/approval
+ *  queries), and keeps the generic row. */
+const PlanToolPart: FC<TimelineToolCallProps> = props => {
+  const path = settledWithoutResult(props) ? null : planPathFromResult(props.result)
+
+  return path ? <PlanToolCard path={path} /> : <ToolFallback {...props} />
+}
+
 const TOOL_CARDS: Record<CardToolName, FC<TimelineToolCallProps>> = {
   clarify: ClarifyToolPart,
   delegate_task: DelegateToolPart,
   image_generate: ImageGenerateTool,
   manage_catalog: CatalogInstallTool,
   manage_connections: ConnectionsToolPart,
+  plan_mode: PlanToolPart,
   set_theme: ThemeToolPart,
   setup_beat: SetupBeatToolPart,
   todo: TodoToolPart,

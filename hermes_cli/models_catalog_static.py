@@ -250,6 +250,7 @@ _PROVIDER_MODELS: dict[str, list[str]] = _CuratedCatalog({
         "z-ai/glm-5.3", "z-ai/glm-5.2", "moonshotai/kimi-k2.6", "minimaxai/minimax-m3",
     ],
     "kimi-coding": [
+        "k3.1-pro", "k3.1-pro-highspeed", "k3-256k",
         "kimi-k3", "kimi-k2.7-code", "kimi-k2.6", "kimi-k2.5", "kimi-for-coding", "kimi-for-coding-highspeed",
         "kimi-k2-thinking", "kimi-k2-thinking-turbo", "kimi-k2-turbo-preview", "kimi-k2-0905-preview",
     ],
@@ -261,8 +262,8 @@ _PROVIDER_MODELS: dict[str, list[str]] = _CuratedCatalog({
     "moonshot": [
         "kimi-k3", "kimi-k2.6", "kimi-k2.5", "kimi-k2-thinking", "kimi-k2-turbo-preview", "kimi-k2-0905-preview",
     ],
-    "minimax": list(_MINIMAX_MODELS),
-    "minimax-oauth": ["MiniMax-M3", "MiniMax-M2.7", "MiniMax-M2.7-highspeed"],
+    "minimax": ["MiniMax-M3.1-Flash", *_MINIMAX_MODELS],
+    "minimax-oauth": ["MiniMax-M3.1-Flash", "MiniMax-M3", "MiniMax-M2.7", "MiniMax-M2.7-highspeed"],
     "minimax-cn": list(_MINIMAX_MODELS),
     "anthropic": [
         "claude-fable-5.1", "claude-fable-5", "claude-opus-5-5", "claude-opus-5", "claude-sonnet-5",

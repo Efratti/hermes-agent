@@ -223,3 +223,36 @@ def test_profiles_without_model_listing_never_hit_the_network():
         for profile in flagged:
             assert profile.fetch_models(api_key="k", base_url=profile.base_url) is None, profile.name
     opener.assert_not_called()
+
+
+class _GzipCatalogHandler(BaseHTTPRequestHandler):
+    """Serves /models gzipped, like api.kimi.com does when Accept-Encoding: gzip is sent."""
+
+    models = [{"id": "k3.1-pro"}, {"id": "kimi-for-coding"}]
+
+    def do_GET(self):
+        import gzip
+
+        body = gzip.compress(json.dumps({"data": self.models}).encode())
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Encoding", "gzip")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, format, *args):
+        pass
+
+
+def test_gzip_catalog_body_is_decoded():
+    """A gzipped catalog must decode, not degrade to the static list (Kimi sends
+    Accept-Encoding: gzip and urllib never decompresses on its own)."""
+    profile = ProviderProfile(name="test", base_url="http://127.0.0.1:1")
+    server = HTTPServer(("127.0.0.1", 0), _GzipCatalogHandler)
+    port = server.server_address[1]
+    Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        result = profile.fetch_models(api_key="k", base_url=f"http://127.0.0.1:{port}")
+    finally:
+        server.shutdown()
+    assert result == ["k3.1-pro", "kimi-for-coding"]

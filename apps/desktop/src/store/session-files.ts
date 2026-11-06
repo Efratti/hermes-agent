@@ -37,6 +37,15 @@ export function closeSessionFiles(): void {
   $sessionFilesOpen.set(false)
 }
 
+export type SessionFilesView = 'file' | 'turn'
+
+/** How the panel groups its rows; resets to 'turn' on app start. */
+export const $sessionFilesView = atom<SessionFilesView>('turn')
+
+export function setSessionFilesView(view: SessionFilesView): void {
+  $sessionFilesView.set(view)
+}
+
 export function toggleSessionFiles(): void {
   if ($sessionFilesOpen.get()) {
     closeSessionFiles()
