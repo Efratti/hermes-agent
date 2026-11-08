@@ -318,3 +318,87 @@ describe('ErrorBoundary portal teardown recovery', () => {
     expect(portalRecoveryWarningCount(warnSpy.mock.calls)).toBe(1)
   })
 })
+
+// A translation layer (Google Translate's extension) reparents the text nodes
+// React owns, and the DOM then throws NotFoundError from inside React's commit.
+// lib/foreign-dom-guard.ts absorbs those calls; this recovery is the second line
+// so a path the guard cannot see never costs the whole workspace pane.
+const TRANSLATED_REMOVE_CHILD_ERROR = new Error(
+  "Failed to execute 'removeChild' on 'Node': The node to be removed is not a child of this node."
+)
+
+const foreignDomRecoveryWarningCount = (calls: unknown[][]) =>
+  calls.filter(call => call.some(value => String(value).includes('auto-recovering from foreign DOM mutation'))).length
+
+describe('ErrorBoundary foreign DOM mutation recovery', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.setSystemTime(0)
+    vi.spyOn(console, 'error').mockImplementation(() => undefined)
+  })
+
+  afterEach(() => {
+    cleanup()
+    vi.useRealTimers()
+    vi.restoreAllMocks()
+  })
+
+  it('auto-recovers a scoped workspace pane crashed by a translated text node', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const box: { error: Error | null } = { error: TRANSLATED_REMOVE_CHILD_ERROR }
+    const Bomb = makeBomb(box)
+
+    render(
+      <ErrorBoundary fallback={() => <div>scoped fallback</div>} label="contrib:workspace">
+        <Bomb />
+      </ErrorBoundary>
+    )
+
+    box.error = null
+    act(() => vi.runOnlyPendingTimers())
+
+    expect(screen.getByText('recovered')).toBeTruthy()
+    expect(screen.queryByText('scoped fallback')).toBeNull()
+    expect(foreignDomRecoveryWarningCount(warnSpy.mock.calls)).toBe(1)
+  })
+
+  it.each([
+    ['the insertBefore variant', new Error("Failed to execute 'insertBefore' on 'Node': The node before which the new node is to be inserted is not a child of this node.")],
+    ['the replaceChild variant', new Error("Failed to execute 'replaceChild' on 'Node': The node to be replaced is not a child of this node.")]
+  ])('auto-recovers %s in a scoped boundary', (_label, error) => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const box: { error: Error | null } = { error }
+    const Bomb = makeBomb(box)
+
+    render(
+      <ErrorBoundary fallback={() => <div>scoped fallback</div>} label="contrib:workspace">
+        <Bomb />
+      </ErrorBoundary>
+    )
+
+    box.error = null
+    act(() => vi.runOnlyPendingTimers())
+
+    expect(screen.getByText('recovered')).toBeTruthy()
+    expect(foreignDomRecoveryWarningCount(warnSpy.mock.calls)).toBe(1)
+  })
+
+  it('still stops after the recovery budget, so a permanent crash shows the fallback', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const Bomb = makeBomb({ error: TRANSLATED_REMOVE_CHILD_ERROR })
+
+    render(
+      <ErrorBoundary fallback={() => <div>scoped fallback</div>} label="contrib:workspace">
+        <Bomb />
+      </ErrorBoundary>
+    )
+
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      act(() => vi.runOnlyPendingTimers())
+    }
+
+    expect(screen.getByText('scoped fallback')).toBeTruthy()
+    expect(foreignDomRecoveryWarningCount(warnSpy.mock.calls)).toBe(3)
+    expect(vi.getTimerCount()).toBe(0)
+  })
+})
