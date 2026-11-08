@@ -41,6 +41,17 @@ _TRUTHY_STRINGS = frozenset({"on", "true", "yes", "1", "approve", "enabled"})
 
 # --- Config resolution ---
 
+def effective_policy_note(subsystem: str) -> str:
+    """One line stating what the gate ACTUALLY does, not what the config boolean says.
+
+    ``/memory`` used to print ``write_approval = off`` while an unattended review's patch/remove
+    was still being staged by the origin gate — factually false for the operator."""
+    if subsystem == MEMORY:
+        return ("effective policy: write_approval governs foreground writes only; an unattended "
+                "background review ALWAYS stages patch/remove (hard rule in memory_tool.py).")
+    return "effective policy: write_approval governs every skill write, foreground or background."
+
+
 def write_approval_enabled(subsystem: str) -> bool:
     """Read ``<subsystem>.write_approval``; any unset/invalid value means gate off."""
     if subsystem not in _SUBSYSTEMS:
@@ -71,17 +82,133 @@ def _pending_files(subsystem: str) -> list:
     return list(d.glob("*.json")) if d.exists() else []
 
 
+# --- Pending-queue lifecycle ---
+# A staged proposal is a snapshot of an intent: it is replayable only while the entry it was
+# reviewed against is still live. Left unmanaged the queue grows forever (measured on this host:
+# 31 records over 53 days, 27 of them un-replayable). Expired, stale-anchor and superseded
+# records are ARCHIVED under <pending>/<subsystem>/discarded/ with a reason, never silently
+# deleted, and the live queue is capped so a human can still read it.
+PENDING_TTL_DAYS = 7.0
+PENDING_MAX_RECORDS = 10
+_DELETE_ACTIONS = frozenset({"replace", "remove", "patch"})
+
+
+def _lifecycle_limits() -> tuple[float, int]:
+    """``(ttl_days, max_records)`` from ``memory.pending_ttl_days`` / ``memory.pending_max_records``."""
+    ttl, cap = PENDING_TTL_DAYS, PENDING_MAX_RECORDS
+    try:
+        from hermes_cli.config import load_config, cfg_get
+        config = load_config()
+        ttl = float(cfg_get(config, MEMORY, "pending_ttl_days", default=ttl) or ttl)
+        cap = int(cfg_get(config, MEMORY, "pending_max_records", default=cap) or cap)
+    except Exception:
+        pass
+    return max(0.0, ttl), max(0, cap)
+
+
+def _discard_dir(subsystem: str) -> Path:
+    return _pending_path(subsystem, "").parent / "discarded"
+
+
+def _archive_record(subsystem: str, record: dict[str, Any], reason: str) -> bool:
+    """Move a record out of the live queue into ``discarded/``, keeping the proposal."""
+    rid = record.get("id") or uuid.uuid4().hex[:8]
+    try:
+        d = _discard_dir(subsystem)
+        d.mkdir(parents=True, exist_ok=True)
+        atomic_json_write(d / f"{rid}.json",
+                          {**record, "discarded_reason": reason, "discarded_at": time.time()})
+    except Exception as e:  # pragma: no cover - an archive failure must not stop the sweep
+        logger.warning("Failed to archive pending %s/%s (%s): %s", subsystem, rid, reason, e)
+        return False
+    return discard_pending(subsystem, rid)
+
+
+def _memory_file_entries(target: str) -> Optional[list[str]]:
+    """Entries of the live memory file a memory proposal targets, or None when unreadable."""
+    try:
+        from hermes_constants import get_hermes_home
+        from tools.memory_tool_store import ENTRY_DELIMITER
+        path = get_hermes_home() / "memories" / ("USER.md" if target == "user" else "MEMORY.md")
+        if not path.exists():
+            return None
+        return path.read_text(encoding="utf-8").split(ENTRY_DELIMITER)
+    except Exception:
+        return None
+
+
+def _destructive_ops(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    ops = (payload.get("operations") or []) if payload.get("action") == "batch" else [payload]
+    return [op for op in ops if isinstance(op, dict) and op.get("action") in _DELETE_ACTIONS]
+
+
+def record_status(subsystem: str, record: dict[str, Any]) -> str:
+    """``valid``, ``stale`` (a pinned anchor is gone from the live file) or ``add-only``."""
+    payload = record.get("payload") or {}
+    if subsystem != MEMORY:
+        return "valid"  # skill proposals are diffs, not anchored entry edits
+    ops = _destructive_ops(payload)
+    if not ops:
+        return "add-only"
+    if any(not op.get("matched_entry") for op in ops):
+        return "stale"  # staged before entry pinning: no verifiable target
+    entries = _memory_file_entries(payload.get("target") or "memory")
+    if entries is None:  # unreadable store: never archive on a guess
+        return "valid"
+    return "valid" if all(op["matched_entry"] in entries for op in ops) else "stale"
+
+
+def record_age(record: dict[str, Any], *, now: Optional[float] = None) -> str:
+    age = max(0.0, (time.time() if now is None else now) - float(record.get("created_at") or 0))
+    return f"{int(age // 86400)}d" if age >= 86400 else f"{int(age // 3600)}h"
+
+
+def proposal_key(subsystem: str, payload: dict[str, Any]) -> tuple:
+    """Identity of a proposal: same target plus same anchors = the same intent, not a new one.
+    Destructive ops key on their anchor only, so a newer edit of the same entry supersedes the
+    old proposal; ``add`` keys on its content."""
+    ops = (payload.get("operations") or []) if payload.get("action") == "batch" else [payload]
+    anchors = []
+    for op in ops:
+        if not isinstance(op, dict):
+            continue
+        anchor = op.get("matched_entry") or op.get("old_text") or ""
+        if not anchor and op.get("action") == "add":
+            anchor = (op.get("content") or "")[:120]
+        anchors.append((op.get("action"), anchor))
+    return (subsystem, payload.get("target") or "memory", tuple(anchors))
+
+
+def _normalized_key(key: Any) -> Optional[tuple]:
+    """A stored ``proposal_key`` (JSON turns tuples into lists) back into a comparable tuple."""
+    try:
+        return (key[0], key[1], tuple(tuple(x) for x in key[2]))
+    except Exception:
+        return None
+
+
 def stage_write(subsystem: str, payload: dict[str, Any], *, summary: str, origin: str) -> dict[str, Any]:
     """Persist a pending write and return its record (``id`` + metadata). ``payload`` is the exact
     kwargs to replay the write on approval; ``origin`` is ``foreground`` or ``background_review``.
+    A proposal that supersedes an existing record with the same key REPLACES it (the older one is
+    archived as ``superseded``) so re-running the same review cannot pile up duplicates.
     Best-effort: on disk failure it logs and still returns a record — the write is lost, which is
     the safe failure for an approval gate (nothing silently committed)."""
     pid = uuid.uuid4().hex[:8]
+    key = proposal_key(subsystem, payload)
     record = {
         "id": pid, "subsystem": subsystem, "action": payload.get("action", ""),
         "summary": (summary or "").strip(), "origin": origin or "foreground",
-        "created_at": time.time(), "payload": payload,
+        "created_at": time.time(), "payload": payload, "proposal_key": [key[0], key[1], [list(a) for a in key[2]]],
     }
+    superseded: list[str] = []
+    if any(anchor for _, anchor in key[2]):
+        with suppress(Exception):
+            for old in list_pending(subsystem, sweep=False):
+                if _normalized_key(old.get("proposal_key")) == key and _archive_record(subsystem, old, "superseded"):
+                    superseded.append(old["id"])
+    if superseded:
+        record["superseded"] = superseded
     try:
         atomic_json_write(_pending_path(subsystem, pid), record)
     except Exception as e:  # pragma: no cover - disk failure path
@@ -89,8 +216,15 @@ def stage_write(subsystem: str, payload: dict[str, Any], *, summary: str, origin
     return record
 
 
-def list_pending(subsystem: str) -> list[dict[str, Any]]:
-    """Return all pending records for ``subsystem``, oldest first."""
+def list_pending(subsystem: str, *, sweep: bool = True) -> list[dict[str, Any]]:
+    """Return the actionable pending records for ``subsystem``, oldest first.
+
+    Unless ``sweep`` is False this first archives records that can no longer be applied
+    (over TTL, anchor gone, over the cap), so callers never show a proposal that approval
+    would refuse anyway. ``sweep`` is False only for the sweeper's own read."""
+    if sweep:
+        with suppress(Exception):
+            sweep_pending(subsystem)
     records: list[dict[str, Any]] = []
     for p in _pending_files(subsystem):
         try:
@@ -102,6 +236,44 @@ def list_pending(subsystem: str) -> list[dict[str, Any]]:
             logger.warning("Skipping unreadable pending record: %s", p)
     records.sort(key=lambda r: r.get("created_at", 0))
     return records
+
+
+def sweep_pending(subsystem: str, *, now: Optional[float] = None, ttl_days: Optional[float] = None,
+                  max_records: Optional[int] = None, dry_run: bool = False) -> dict[str, Any]:
+    """Expire, discard stale-anchor and cap-overflow records; returns what it removed.
+
+    Order matters: TTL first, then staleness, then the cap over what survives, so an old record
+    that is also stale is reported once (as expired) and the cap evicts oldest-first."""
+    records = list_pending(subsystem, sweep=False)
+    ttl, cap = _lifecycle_limits()
+    ttl = ttl if ttl_days is None else ttl_days
+    cap = cap if max_records is None else max_records
+    now = time.time() if now is None else now
+    report: dict[str, Any] = {"expired": [], "stale": [], "evicted": [], "kept": 0}
+    live: list[dict[str, Any]] = []
+    for record in records:
+        created = float(record.get("created_at") or 0)
+        if ttl > 0 and now - created > ttl * 86400:
+            report["expired"].append(record.get("id"))
+        elif record_status(subsystem, record) == "stale":
+            report["stale"].append(record.get("id"))
+        else:
+            live.append(record)
+    if cap > 0 and len(live) > cap:
+        overflow = live[: len(live) - cap]  # oldest first (list_pending is ascending)
+        report["evicted"] = [r.get("id") for r in overflow]
+        live = live[len(live) - cap:]
+    report["kept"] = len(live)
+    if not dry_run and (report["expired"] or report["stale"] or report["evicted"]):
+        by_id = {r.get("id"): r for r in records}
+        for reason, ids in (("expired", report["expired"]), ("stale-anchor", report["stale"]),
+                            ("evicted-cap", report["evicted"])):
+            for rid in ids:
+                _archive_record(subsystem, by_id.get(rid) or {"id": rid}, reason)
+        logger.info("Pending %s sweep: %d expired, %d stale-anchor, %d over cap; %d kept",
+                    subsystem, len(report["expired"]), len(report["stale"]),
+                    len(report["evicted"]), len(live))
+    return report
 
 
 def get_pending(subsystem: str, pending_id: str) -> Optional[dict[str, Any]]:
@@ -129,13 +301,9 @@ def discard_pending(subsystem: str, pending_id: str) -> bool:
 
 
 def pending_count(subsystem: str) -> int:
-    """Cheap count of pending records (for notification badges)."""
-    d = _pending_path(subsystem, "").parent
-    if not d.exists():
-        return 0
-    with suppress(Exception):
-        return sum(1 for _ in d.glob("*.json"))
-    return 0
+    """Count of actionable pending records (for notification badges). Sweeps first, so an
+    expired or stale record stops nagging instead of counting down to nothing."""
+    return len(list_pending(subsystem))
 
 
 # --- Write origin ---

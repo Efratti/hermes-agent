@@ -176,6 +176,48 @@ def destructive_ops(payload: dict[str, Any]) -> list[dict[str, Any]]:
     return [op for op in ops if (op or {}).get("action") in _BG_DELETE_ACTIONS]
 
 
+def _is_splittable(operations: list[dict[str, Any]]) -> bool:
+    """True when every op is either an ``add`` or a gated patch/remove. An unknown action means a
+    malformed (or future) payload: do not split it, stage it whole and fail closed."""
+    return all((op or {}).get("action") in ("add",) + _BG_DELETE_ACTIONS for op in operations)
+
+
+def _stage_destructive_half(store, target: str, operations: list[dict[str, Any]],
+                            destructive: list[dict[str, Any]]) -> Optional[str]:
+    """Batch poisoning fix (#117894): apply the ``add`` ops now, stage only the gated ones.
+
+    A batch carrying one patch/remove used to be staged whole, so every net-new fact riding in
+    it was silently withheld while the review reported success. Adds append and cannot invalidate
+    a patch anchor, so pinning first and applying them before staging is safe."""
+    adds = [op for op in operations if (op or {}).get("action") not in _BG_DELETE_ACTIONS]
+    if not adds:
+        return None  # pure destructive batch: the whole-batch path below says it better
+    staged_payload = {"action": "batch", "target": target, "operations": destructive}
+    if (unmatched := _pin_matched_entries(store, staged_payload)) is not None:
+        return unmatched  # anchors already gone: apply nothing, report what the direct write would
+    applied = store.apply_batch(target, adds)
+    try:
+        from tools import write_approval as wa
+        FAILURE_CLASS.set("staged")
+        record = wa.stage_write(
+            wa.MEMORY, staged_payload,
+            summary=(f"background review consolidation (batch on {target}): "
+                     + "; ".join(_batch_op_line(op) for op in destructive))[:200],
+            origin=wa.current_origin())
+        return json.dumps({
+            "success": True, "applied_adds": len(adds), "add_result": applied,
+            "staged": True, "proposal_staged": True, "pending_id": record["id"],
+            "message": (f"Saved {len(adds)} new fact(s) to {target}. Background review may not edit "
+                        f"existing entries unattended: {len(destructive)} patch/remove op(s) were "
+                        "staged for approval — review them with /memory pending."),
+        }, ensure_ascii=False)
+    except Exception:
+        logger.warning("Failed to stage background-review consolidation; denying", exc_info=True)
+        FAILURE_CLASS.set("gate_refused")
+        return tool_error(
+            "The destructive ops could not be staged; no existing entry was changed.", success=False)
+
+
 def _background_delete_gate(store, action, operations, target="memory", content=None,
                             old_text=None) -> Optional[str]:
     """Fail-closed operation gate for unattended background-review forks (#105921): ``add``
@@ -191,8 +233,13 @@ def _background_delete_gate(store, action, operations, target="memory", content=
     payload = ({"action": "batch", "target": target, "operations": operations}
                if operations is not None else
                {"action": action, "target": target, "content": content, "old_text": old_text})
-    if not destructive_ops(payload):
+    destructive = destructive_ops(payload)
+    if not destructive:
         return None
+    if operations is not None and _is_splittable(operations):
+        split = _stage_destructive_half(store, target, operations, destructive)
+        if split is not None:
+            return split
     detail = ("; ".join(_batch_op_line(op) for op in operations) if operations is not None
               else _batch_op_line({"action": action, "content": content, "old_text": old_text}))
     try:

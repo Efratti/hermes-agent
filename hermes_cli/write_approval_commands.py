@@ -11,25 +11,38 @@ from tools import write_approval as wa
 
 def _fmt_state(subsystem: str) -> str:
     on = wa.write_approval_enabled(subsystem)
-    return f"{subsystem}.write_approval = {'on' if on else 'off'}"
+    return "\n".join([f"{subsystem}.write_approval = {'on' if on else 'off'}",
+                      wa.effective_policy_note(subsystem)])
 
 
 def _fmt_pending_list(subsystem: str) -> str:
-    records = wa.list_pending(subsystem)
+    # Sweep explicitly (not via list_pending) so the notice can name what it dropped: a record
+    # quietly vanishing from the queue is exactly the silent loss this gate exists to prevent.
+    report = wa.sweep_pending(subsystem)
+    records = wa.list_pending(subsystem, sweep=False)
     if not records:
-        return f"No pending {subsystem} writes."
-    lines = [f"Pending {subsystem} writes ({len(records)}):"]
-    for r in records:
-        origin = r.get("origin", "foreground")
-        tag = " [auto]" if origin == "background_review" else ""
-        lines.append(f"  {r['id']}{tag}  {r.get('summary', '')}")
-        if subsystem == wa.MEMORY:
-            lines.extend(f"      {line}" for line in _matched_entries(r["payload"]))
-    lines.append("")
-    lines.append(f"Apply: /{subsystem} approve <id>   Reject: /{subsystem} reject <id>")
-    if subsystem == wa.SKILLS:
-        lines.append("Review full diff: /skills diff <id>")
-    return "\n".join(lines)
+        out = f"No pending {subsystem} writes."
+    else:
+        lines = [f"Pending {subsystem} writes ({len(records)}):"]
+        for r in records:
+            origin = r.get("origin", "foreground")
+            tag = " [auto]" if origin == "background_review" else ""
+            age = wa.record_age(r)
+            status = wa.record_status(subsystem, r)
+            lines.append(f"  {r['id']}{tag}  ({age}, {status})  {r.get('summary', '')}")
+            if subsystem == wa.MEMORY:
+                lines.extend(f"      {line}" for line in _matched_entries(r["payload"]))
+        lines.append("")
+        lines.append(f"Apply: /{subsystem} approve <id>   Reject: /{subsystem} reject <id>")
+        if subsystem == wa.SKILLS:
+            lines.append("Review full diff: /skills diff <id>")
+        out = "\n".join(lines)
+    dropped = [f"{len(ids)} {reason}" for reason, ids in
+               (("expired", report.get("expired")), ("stale", report.get("stale")),
+                ("over cap", report.get("evicted"))) if ids]
+    if dropped:
+        out += (f"\nDiscarded {', '.join(dropped)} on read (archive: {wa._discard_dir(subsystem)})")
+    return out
 
 
 def handle_pending_subcommand(
@@ -65,12 +78,14 @@ def _approve(subsystem: str, rest: list[str], memory_store) -> str:
     if not rest:
         return _usage(subsystem)
     target = rest[0]
-    records = wa.list_pending(subsystem)
-    if not records:
-        return f"No pending {subsystem} writes."
     if target.lower() == "all":
+        records = wa.list_pending(subsystem)
+        if not records:
+            return f"No pending {subsystem} writes."
         targets = list(records)
     else:
+        # Resolve an explicit id WITHOUT sweeping first: a record whose anchor just went stale
+        # must reach the applier so it can say why it refused, not vanish as "no such write".
         rec = wa.get_pending(subsystem, target)
         if not rec:
             return f"No pending {subsystem} write with id '{target}'."
