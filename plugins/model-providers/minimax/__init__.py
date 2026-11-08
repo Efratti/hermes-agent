@@ -40,6 +40,9 @@ class MiniMaxProfile(ProviderProfile):
 minimax = MiniMaxProfile(
     name="minimax", aliases=("mini-max",), api_mode="anthropic_messages", env_vars=("MINIMAX_API_KEY",),
     base_url="https://api.minimax.io/anthropic", auth_type="api_key", default_aux_model="MiniMax-M3",
+    # Inference is Anthropic-compatible, the plan catalog (MiniMax-M3.1-Flash …) lives on the
+    # OpenAI-compatible host; without this override discovery listed the legacy five ids only.
+    models_url="https://api.minimax.io/v1/models",
 )
 
 minimax_cn = MiniMaxProfile(
@@ -54,6 +57,7 @@ minimax_oauth = MiniMaxProfile(
     signup_url="https://api.minimax.io/",
     env_vars=(),  # OAuth — tokens in auth.json, not env
     base_url="https://api.minimax.io/anthropic", auth_type="oauth_external", default_aux_model="MiniMax-M2.7",
+    models_url="https://api.minimax.io/v1/models",
 )
 
 register_provider(minimax)
