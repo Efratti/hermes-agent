@@ -588,7 +588,19 @@ class ProviderProfile:
 
         try:
             with open_credentialed_url(req, timeout=timeout) as resp:
-                data = json.loads(resp.read().decode())
+                payload = resp.read()
+                try:
+                    encoding = (resp.headers.get("Content-Encoding") or "").lower()
+                except Exception:
+                    encoding = ""
+            # A profile may ask for gzip (Kimi sends ``Accept-Encoding: gzip``); urllib does not
+            # decompress, so decoding the body raised and the whole catalog silently degraded to
+            # the static list. Decompress here instead of dropping the live catalog.
+            if encoding == "gzip" or payload[:2] == b"\x1f\x8b":
+                import gzip
+
+                payload = gzip.decompress(payload)
+            data = json.loads(payload.decode())
             items = data if isinstance(data, list) else data.get("data", [])
             from hermes_cli.chat_catalog import chat_catalog_ids
 
