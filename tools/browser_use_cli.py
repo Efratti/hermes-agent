@@ -134,6 +134,29 @@ def _has_cdp_env(env: dict) -> bool:
     return bool(env.get("BU_CDP_WS") or env.get("BU_CDP_URL"))
 
 
+def _no_endpoint_error(cfg: dict | None = None) -> str:
+    """Actionable text for a route that resolved no browser contract at all.
+
+    The harness reads BU_CDP_* only at daemon spawn, then falls back to hunting for an installed
+    Chrome and dies with ``fatal: chrome-not-running``. That message names nothing the user can
+    change, so this guard fails closed first and names the three fixes that actually move the route.
+    """
+    cfg = cfg if cfg is not None else _read_browser_cfg()
+    provider = str(cfg.get("cloud_provider") or "unset")
+    override = "set" if _quiet(
+        lambda: importlib.import_module("tools.browser_session_cdp").get_cdp_override_raw(), "") else "empty"
+    empty_section = " (the browser section read as empty in this scope, so autospawn was not granted)" \
+        if not cfg else ""
+    return (
+        "No browser endpoint: this call resolved neither a CDP target nor browser authorisation, so the "
+        f"harness would start blind (cloud_provider={provider}, /browser connect override {override}, "
+        f"executable_path={cfg.get('executable_path') or 'unset'}){empty_section}. Fix one of: run "
+        "/browser connect <cdp-url>; make BROWSER_USE_API_KEY visible to this profile with "
+        "cloud_provider: browser-use; or point browser.executable_path at a CDP-capable Chromium. Then run "
+        "/browser disconnect to flush the cached route and retry."
+    )
+
+
 def _export_session_cdp(env: dict, get_session_info: Callable[[str], Any], cache_key: str,
                         fail_msg: Callable[[Exception], str], no_cdp_msg: str) -> Optional[str]:
     """Export the CDP endpoint from ``get_session_info(cache_key)``; error string on failure / no CDP."""
@@ -804,6 +827,20 @@ def browser_exec(code: str, session: str = "", timeout_s: int = _DEFAULT_TIMEOUT
         env, session, task_id, bool(local), local_sidecar, route_key)
     if route_err:
         return tool_error(route_err)
+    # BU_AUTOSPAWN makes the CLI start a Browser Use cloud browser when no local
+    # Chrome/CDP endpoint is reachable (their API key authenticates it). Decided BEFORE the
+    # no-endpoint guard: it is the other half of the contract that guard accepts. It requires a
+    # browser section that actually exists: an empty section means the config could not be read in
+    # this scope, and granting autospawn there hides a routing failure behind a harness that then
+    # dies on its own auth gate.
+    cfg = _read_browser_cfg()
+    if "BU_AUTOSPAWN" not in env and cfg and is_legacy_browser_use_cloud_config(cfg):
+        env["BU_AUTOSPAWN"] = "1"
+    if not _has_cdp_env(env) and not env.get("BU_AUTOSPAWN"):
+        return tool_error(_no_endpoint_error(cfg))
+    logger.info("browser_exec route: cdp=%s autospawn=%s sidecar=%s",
+                env.get("BU_CDP_WS") or env.get("BU_CDP_URL") or "-",
+                env.get("BU_AUTOSPAWN") or "-", local_sidecar)
     if local_sidecar:
         env["BU_NAME"] = _sidecar_daemon_name(session)
     fit_default_socket_dir(env)  # BU_NAME is final: a deep HOME's socket would overflow sun_path
@@ -826,11 +863,8 @@ def browser_exec(code: str, session: str = "", timeout_s: int = _DEFAULT_TIMEOUT
     if workspace:
         env["BH_AGENT_WORKSPACE"] = workspace
 
-    # BU_AUTOSPAWN makes the CLI start a Browser Use cloud browser when no local
-    # Chrome/CDP endpoint is reachable (their API key authenticates it)
-    if "BU_AUTOSPAWN" not in env and is_legacy_browser_use_cloud_config(_read_browser_cfg()):
-        env["BU_AUTOSPAWN"] = "1"
-
+    # BU_AUTOSPAWN for legacy direct-API configs is decided right after routing, before the
+    # no-endpoint guard (see above).
     timeout = _clamp_timeout(timeout_s)
     started = time.time()
 

@@ -1129,3 +1129,70 @@ class TestExecHybridPrivateUrlRouting:
         assert daemons == [want for _, want in steps]
         assert self.cloud_keys == ["t"]
         assert self.local_keys == ["t::local", "t::local"]
+
+
+class TestNoEndpointGuard:
+    """A routed call with no CDP contract must fail with guidance instead of starting the
+    harness blind. Before the guard, routing left BU_CDP_* unset, the harness fell back to
+    its own "find a running Chrome" discovery, and the user got
+    "fatal: chrome-not-running" with no hint which setting was wrong."""
+
+    def test_route_without_endpoint_returns_actionable_error(self, tmp_path, monkeypatch):
+        ran = tmp_path / "cli-ran"
+        cli = _fake_cli(tmp_path, f"touch {ran}\n")
+        monkeypatch.setattr(bu_cli, "_find_cli", lambda: [cli])
+        monkeypatch.setattr(
+            bu_cli, "_route_exec_current",
+            lambda env, session, task_id, local, sidecar, key: (dict(env), None, sidecar, 0))
+        monkeypatch.setattr("hermes_cli.config_effective.load_user_config_effective",
+                            lambda: {"browser": {"cloud_provider": "browser-use"}})
+
+        result = json.loads(bu_cli.browser_exec("print(1)", task_id="t"))
+
+        assert "error" in result, result
+        assert "no browser endpoint" in result["error"].lower(), result
+        assert not ran.exists(), "the harness ran with no endpoint"
+
+    def test_autospawn_route_is_not_treated_as_missing(self, tmp_path, monkeypatch):
+        ran = tmp_path / "cli-ran"
+        cli = _fake_cli(tmp_path, f"touch {ran}\necho 'TITLE: ok'\n")
+        monkeypatch.setattr(bu_cli, "_find_cli", lambda: [cli])
+
+        def route(env, session, task_id, local, sidecar, key):
+            env = dict(env)
+            env["BU_AUTOSPAWN"] = "1"
+            return env, None, sidecar, 0
+
+        monkeypatch.setattr(bu_cli, "_route_exec_current", route)
+        monkeypatch.setattr("hermes_cli.config_effective.load_user_config_effective",
+                            lambda: {"browser": {"cloud_provider": "browser-use"}})
+
+        result = json.loads(bu_cli.browser_exec("print(1)", task_id="t"))
+
+        assert result.get("output", "").strip() == "TITLE: ok", result
+        assert ran.exists()
+
+
+class TestAutospawnHole:
+    """An empty ``browser:`` section must not be read as a legacy direct-API config.
+
+    ``is_legacy_browser_use_cloud_config`` treats a missing ``cloud_provider`` as legacy, so an
+    unreadable section used to grant BU_AUTOSPAWN. The harness then tried to autospawn, hit its own
+    auth gate, and reported chrome-not-running, which hid the real problem (no route resolved).
+    """
+
+    def test_empty_browser_section_does_not_grant_autospawn(self, tmp_path, monkeypatch):
+        ran = tmp_path / "cli-ran"
+        monkeypatch.setenv("BROWSER_USE_API_KEY", "bu-key")  # the legacy check's other half
+        monkeypatch.setattr("hermes_cli.config_effective.load_user_config_effective", dict)
+        monkeypatch.setattr(bu_cli, "_find_cli", lambda: [_fake_cli(tmp_path, f"touch {ran}\n")])
+        monkeypatch.setattr(
+            bu_cli, "_route_exec_current",
+            lambda env, session, task_id, local, sidecar, key: (dict(env), None, sidecar, 0))
+
+        result = json.loads(bu_cli.browser_exec("print(1)", task_id="t"))
+
+        assert "error" in result, result
+        assert "no browser endpoint" in result["error"].lower(), result
+        assert "read as empty" in result["error"], result
+        assert not ran.exists(), "autospawn was granted from an empty config section"
