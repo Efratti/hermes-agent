@@ -32,6 +32,7 @@ import {
   togglePanesFlipped,
   toggleRightSide
 } from '@/store/layout'
+import { $nativeNotifyPrefs, setNativeNotifyEnabled } from '@/store/native-notifications'
 import { REVIEW_PANE_ID } from '@/store/review'
 import { $unreadSessionCount } from '@/store/session-dot-state'
 import { $titlebarAppActionsSide, TITLEBAR_FIXED_TOOLS } from '@/store/titlebar-app-actions'
@@ -191,6 +192,7 @@ export function TitlebarControls({ leftTools = [], tools = [], onOpenSettings }:
   const panesFlipped = useStore($panesFlipped)
   const unreadCount = useStore($unreadSessionCount)
   const appActionsSide = useStore($titlebarAppActionsSide)
+  const notificationsEnabled = useStore($nativeNotifyPrefs).enabled
   const interfaceMode = useStore($interfaceMode)
   const unreadBadge = unreadCount > 0 ? unreadCount : undefined
   const unreadHint = unreadBadge ? ` · ${t.titlebar.unreadSessions(unreadBadge)}` : ''
@@ -254,6 +256,20 @@ export function TitlebarControls({ leftTools = [], tools = [], onOpenSettings }:
       rightEdge.toggle()
     },
     tour: 'right-pane-toggle'
+  }
+
+  // The same master switch as Settings > Notifications > Enable notifications. It
+  // never touches the per-kind choices, so switching back on restores them as they were.
+  const notificationsTool: TitlebarTool = {
+    ...TITLEBAR_FIXED_TOOLS.notifications,
+    active: notificationsEnabled,
+    icon: <TitlebarIcon name={notificationsEnabled ? 'bell' : 'bell-slash'} />,
+    id: 'notifications',
+    label: t.titlebar.desktopNotifications,
+    onSelect: () => {
+      triggerHaptic('tap')
+      setNativeNotifyEnabled(!notificationsEnabled)
+    }
   }
 
   // Static system tools — always pinned to the screen's right edge so the
@@ -362,7 +378,7 @@ export function TitlebarControls({ leftTools = [], tools = [], onOpenSettings }:
 
   const visibleSystemTools = appActionsSide === 'right' ? systemTools.filter(visibleTool) : []
   const visiblePaneTools = tools.filter(visibleTool)
-  const visibleRightFixedTools = [flipTool, rightSidebarTool].filter(visibleTool)
+  const visibleRightFixedTools = [flipTool, rightSidebarTool, notificationsTool].filter(visibleTool)
 
   return (
     <>

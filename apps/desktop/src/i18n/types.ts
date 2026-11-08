@@ -560,6 +560,7 @@ export interface Translations extends NoticeTranslations {
     muteHaptics: string
     unmuteHaptics: string
     openSettings: string
+    desktopNotifications: string
     openStarmap: string
     enterHud: string
     exitHud: string

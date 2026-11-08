@@ -10,6 +10,7 @@ import { $narrowViewport } from '@/components/pane-shell/tree/store'
 import { registry } from '@/contrib/registry'
 import { I18nProvider } from '@/i18n'
 import { $fileBrowserOpen, $leftSideOpen, CHAT_SIDEBAR_PANE_ID, FILE_BROWSER_PANE_ID } from '@/store/layout'
+import { $nativeNotifyPrefs, setNativeNotifyEnabled } from '@/store/native-notifications'
 import { REVIEW_PANE_ID } from '@/store/review'
 import { setTitlebarAppActionsSide } from '@/store/titlebar-app-actions'
 
@@ -189,6 +190,35 @@ describe('TitlebarControls fixed clusters', () => {
         window.removeEventListener(TITLEBAR_CHROME_CHANGED_EVENT, listener)
       }
     })
+  })
+})
+
+describe('titlebar notifications bell', () => {
+  afterEach(() => {
+    setNativeNotifyEnabled(true)
+    cleanup()
+  })
+
+  it('flips the Settings master switch and shows its state on the icon', () => {
+    setNativeNotifyEnabled(true)
+    const kindsBefore = $nativeNotifyPrefs.get().kinds
+    renderControls('/')
+
+    const bell = screen.getByRole('button', { name: 'Desktop notifications' })
+    expect(bell.getAttribute('aria-pressed')).toBe('true')
+    expect(bell.querySelector('.codicon-bell')).toBeTruthy()
+
+    fireEvent.click(bell)
+
+    expect($nativeNotifyPrefs.get().enabled).toBe(false)
+    expect($nativeNotifyPrefs.get().kinds).toEqual(kindsBefore)
+    expect(bell.getAttribute('aria-pressed')).toBe('false')
+    expect(bell.querySelector('.codicon-bell-slash')).toBeTruthy()
+
+    fireEvent.click(bell)
+
+    expect($nativeNotifyPrefs.get().enabled).toBe(true)
+    expect(bell.querySelector('.codicon-bell')).toBeTruthy()
   })
 })
 
