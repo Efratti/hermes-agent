@@ -30,6 +30,18 @@ logger = logging.getLogger("agent.conversation_loop")
 # max_output_tokens (turn_response_check.py::_derive_finish_reason); text truncation stays on
 # the Codex incomplete continuation, so the text branch below never double-continues it.
 _CONTINUABLE_MODES = {"chat_completions", "bedrock_converse", "anthropic_messages", "codex_responses"}
+
+
+def _refusal_fallback_enabled() -> bool:
+    """``agent.fallback_on_refusal`` (default True): whether a provider safety refusal may switch
+    to the fallback chain. False surfaces the refusal and keeps fallback for availability failures
+    only, so a refused turn is never silently answered by a different model (#124874)."""
+    try:
+        from hermes_cli.config import load_config_readonly
+        agent_cfg = (load_config_readonly() or {}).get("agent") or {}
+        return agent_cfg.get("fallback_on_refusal", True) is not False
+    except Exception:
+        return True
 _THINK_TAG_RE = re.compile(r'<(?:think|thinking|reasoning|REASONING_SCRATCHPAD)[^>]*>', re.IGNORECASE)
 _TRUNCATED_FINAL = site_copy("truncated")
 _FIRST_TRUNCATED_FINAL = _TRUNCATED_FINAL
@@ -278,12 +290,16 @@ def _content_filter_fallback(st: _Trunc, _retry: TurnRetryState) -> Optional[Tru
         and agent._fallback_index < len(agent._fallback_chain)
     ):
         return None
+    if not _refusal_fallback_enabled():
+        logger.warning("%sContent filter terminated stream; fallback skipped (agent.fallback_on_refusal=false). "
+                       "model=%s provider=%s", agent.log_prefix, agent.model, agent.provider)
+        return None
     agent._vprint(
         f"{agent.log_prefix}🛡️  Content filter terminated stream — activating fallback provider...",
         force=True, diagnostic=True,
     )
     agent._emit_diagnostic_status("Content filter terminated stream; switching to fallback...")
-    if agent._try_activate_fallback():
+    if agent._try_activate_fallback(reason=FailoverReason.content_policy_blocked):
         # Roll partial content back to the last clean turn so the fallback gets a
         # coherent continuation point; unmark survivors (their text left the partial).
         if st.truncated_response_parts:
@@ -746,14 +762,9 @@ def handle_content_policy_refusal(
     )
     stop_thinking_spinner(agent, thinking_spinner)
 
-    if agent._has_pending_fallback():
-        agent._buffer_diagnostic_status("⚠️ Model declined to respond (safety refusal) — trying fallback...")
-    if agent._try_activate_fallback():
-        active_system_prompt = _arm_fallback_restart(agent, api_messages, active_system_prompt, _retry)
-        return RefusalVerdict("break", None, active_system_prompt)
-
-    agent._flush_status_buffer()
     _refusal_log = _refusal_text[:500] + "..." if len(_refusal_text) > 500 else _refusal_text
+    # Record the native cause BEFORE any fallback: a successful switch returns early, and without
+    # this line a refusal is indistinguishable from an outage after the fact (#124874).
     # native_stop_reason tells an Anthropic classifier refusal (``refusal``) from a Bedrock guardrail
     # block (``end_turn``); both arrive here as content_filter.
     logger.warning(
@@ -763,6 +774,17 @@ def handle_content_policy_refusal(
         getattr(response, "stop_reason", None) or "n/a", _stop_details or "n/a",
         _refusal_log or "(no text)",
     )
+
+    if _refusal_fallback_enabled():
+        if agent._has_pending_fallback():
+            agent._buffer_diagnostic_status("⚠️ Model declined to respond (safety refusal) — trying fallback...")
+        if agent._try_activate_fallback(reason=FailoverReason.content_policy_blocked):
+            active_system_prompt = _arm_fallback_restart(agent, api_messages, active_system_prompt, _retry)
+            return RefusalVerdict("break", None, active_system_prompt)
+    elif agent._has_pending_fallback():
+        logger.warning("%sRefusal fallback skipped (agent.fallback_on_refusal=false)", agent.log_prefix)
+
+    agent._flush_status_buffer()
     agent._emit_diagnostic_status("⚠️ The model declined to respond to this request (safety refusal).")
     _refusal_response = "⚠️ " + content_policy_copy(
         label=provider_label_for(agent.provider),
